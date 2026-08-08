@@ -73,13 +73,16 @@ const humanAlreadyInvolved =
 
 // --- risk detection -------------------------------------------------------
 
+// Full file objects, not just names — the expertise ranking weights by how
+// much of the diff each file accounts for.
 const files = [];
 for (let page = 1; ; page++) {
   const chunk = await gh(`/pulls/${prNumber}/files?per_page=100&page=${page}`);
-  files.push(...chunk.map((f) => f.filename));
+  files.push(...chunk);
   if (chunk.length < 100) break;
 }
-const riskFiles = files.filter((f) => matchesAny(f, conventions.risk_paths));
+const paths = files.map((f) => f.filename);
+const riskFiles = paths.filter((f) => matchesAny(f, conventions.risk_paths));
 
 if (riskFiles.length && conventions.reviewers.risk_label) {
   await gh(`/issues/${prNumber}/labels`, {
@@ -102,7 +105,7 @@ if (humanAlreadyInvolved) {
 if (
   !riskFiles.length &&
   conventions.exempt_paths.length &&
-  files.every((f) => matchesAny(f, conventions.exempt_paths))
+  paths.every((f) => matchesAny(f, conventions.exempt_paths))
 ) {
   console.log("All changed files match exempt_paths — AI-only tier, no human reviewer assigned.");
   process.exit(0);
@@ -127,11 +130,136 @@ if (!basePool.length) {
 }
 
 const count = Math.min(wanted, basePool.length);
-const start = prNumber % basePool.length;
-const picked = Array.from({ length: count }, (_, i) => basePool[(start + i) % basePool.length]);
+const picked =
+  conventions.reviewers.strategy === "rotation"
+    ? rotate(basePool, count)
+    : await byExpertise(basePool, count);
 
 await gh(`/pulls/${prNumber}/requested_reviewers`, {
   method: "POST",
   body: JSON.stringify({ reviewers: picked }),
 });
 console.log(`Requested review from: ${picked.join(", ")}${riskFiles.length ? " (risk path)" : ""}`);
+
+// --- strategies -----------------------------------------------------------
+
+// Deterministic round robin. Even over time and stable across re-runs, but
+// blind to both expertise and how much each person is already reviewing.
+function rotate(pool, n) {
+  const start = prNumber % pool.length;
+  return Array.from({ length: n }, (_, i) => pool[(start + i) % pool.length]);
+}
+
+// Rank by who has actually touched these files, then balance load *within*
+// that set. Balancing across the whole pool backfires: an author who gets an
+// unqualified suggestion just picks someone else, and the balancing is lost.
+async function byExpertise(pool, n) {
+  const [expertise, load, busy] = await Promise.all([
+    commitCounts(pool),
+    openReviewLoad(pool),
+    conventions.reviewers.skip_unavailable ? limitedAvailability(pool) : new Set(),
+  ]);
+
+  // Availability is a filter, not a ranking — but never let it empty the pool.
+  const available = pool.filter((l) => !busy.has(normalizeLogin(l)));
+  const candidates = available.length ? available : pool;
+  if (!available.length && busy.size) {
+    console.log("Every candidate is marked busy — ignoring availability for this PR.");
+  }
+
+  // Experts first; fall back to the whole candidate list when nobody in the
+  // pool has history on these files (new area, new team member).
+  const experts = candidates.filter((l) => (expertise.get(normalizeLogin(l)) || 0) > 0);
+  const ranked = experts.length ? experts : candidates;
+  if (!experts.length) {
+    console.log("No pool member has recent commits to the changed files — ranking by load only.");
+  }
+
+  const sorted = [...ranked].sort((a, b) => {
+    const [an, bn] = [normalizeLogin(a), normalizeLogin(b)];
+    const byLoad = (load.get(an) || 0) - (load.get(bn) || 0);
+    if (byLoad !== 0) return byLoad;
+    const byExp = (expertise.get(bn) || 0) - (expertise.get(an) || 0);
+    if (byExp !== 0) return byExp;
+    return an.localeCompare(bn); // stable across re-runs
+  });
+
+  for (const l of sorted.slice(0, n)) {
+    console.log(
+      `  ${l}: ${expertise.get(normalizeLogin(l)) || 0} recent commit(s) here, ` +
+        `${load.get(normalizeLogin(l)) || 0} open review(s)`
+    );
+  }
+  return sorted.slice(0, n);
+}
+
+// Commits touching the changed files, by author. Sampled: the largest few
+// files carry most of the signal, and this is one API call each.
+async function commitCounts(pool) {
+  const MAX_FILES = 10;
+  const MAX_COMMITS = 30;
+  const inPool = new Set(pool.map(normalizeLogin));
+  const counts = new Map();
+
+  const sampled = [...files]
+    .sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions))
+    .slice(0, MAX_FILES);
+
+  const perFile = await Promise.all(
+    sampled.map((f) =>
+      gh(
+        `/commits?path=${encodeURIComponent(f.filename)}&per_page=${MAX_COMMITS}&sha=${
+          encodeURIComponent(pr.base.ref)
+        }`
+      ).catch(() => [])
+    )
+  );
+  for (const commits of perFile) {
+    for (const c of commits) {
+      const login = normalizeLogin(c.author?.login);
+      if (login && inPool.has(login)) counts.set(login, (counts.get(login) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+// How many open PRs each candidate is already on the hook for. One call, not
+// one per person — the search API has much tighter rate limits.
+async function openReviewLoad(pool) {
+  const inPool = new Set(pool.map(normalizeLogin));
+  const load = new Map();
+  for (let page = 1; ; page++) {
+    const open = await gh(`/pulls?state=open&per_page=100&page=${page}`);
+    for (const p of open) {
+      if (p.number === prNumber) continue;
+      for (const u of p.requested_reviewers || []) {
+        const login = normalizeLogin(u.login);
+        if (inPool.has(login)) load.set(login, (load.get(login) || 0) + 1);
+      }
+    }
+    if (open.length < 100) break;
+  }
+  return load;
+}
+
+// GitHub's own "busy" status flag, batched into a single GraphQL call.
+async function limitedAvailability(pool) {
+  const fields = pool
+    .map((l, i) => `u${i}: user(login: ${JSON.stringify(l)}) { login status { indicatesLimitedAvailability } }`)
+    .join("\n");
+  try {
+    const res = await fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ query: `query { ${fields} }` }),
+    });
+    const { data } = await res.json();
+    const busy = new Set();
+    for (const v of Object.values(data || {})) {
+      if (v?.status?.indicatesLimitedAvailability) busy.add(normalizeLogin(v.login));
+    }
+    return busy;
+  } catch {
+    return new Set(); // availability is a nicety; never fail assignment over it
+  }
+}

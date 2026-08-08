@@ -176,10 +176,13 @@ outright. Defaulting to `warn` means a dropped tag can neither silently block
 nor silently unblock a merge. Set `severity.default: blocker` to fail closed
 instead.
 
-**Consequence: Copilot is not a reliable gate participant.** It cannot be made
-to emit the prefix, and its native High/Medium/Low severity is UI metadata not
-exposed through any API. Treat it as advisory, or classify its comments
-yourself.
+**Reviewers that cannot tag are separated out rather than trusted.** Copilot
+cannot be made to emit the prefix, and its native High/Medium/Low severity is UI
+metadata no API exposes — so it lives in `advisory_reviewers`. Advisory findings
+count as "a review happened" and are reported in the summary, but can never
+block, whatever they are tagged with. Without that split, every Copilot comment
+would inherit `severity.default`, and flipping that to a blocking tag to fail
+closed would turn all of them into blockers at once.
 
 ---
 
@@ -303,17 +306,30 @@ the PR sits. At Meta, resolving team-assigned diffs to one randomly chosen named
 individual cut time-in-review 11.6% with no quality cost. Broad CODEOWNERS
 globs produce the opposite: 20–30 requests a day to the same tech lead.
 
-**Selection is deterministic**, `PR number % pool size`, walking forward for
-multi-reviewer counts. Re-runs never reshuffle, and the distribution is even
-over time. The PR author is always excluded.
+**Selection ranks expertise first, then balances load within it**
+(`reviewers.strategy: expertise`, the default):
 
-**This is the weakest part of the current implementation.** Deterministic
-rotation is a form of round robin, and round robin ignores queue depth and
-availability by construction. The evidence favors load-balancing *within* the
-expert set rather than across everyone — Meta found that recommending a
-low-workload but inappropriate reviewer just made authors scroll down the list
-and pick someone else. Teams that want GitHub's native load-balancing can empty
-`pool` and use a team's auto-assignment; the gate and tiering still work.
+1. Filter out candidates whose GitHub status is "busy" — unless that empties the
+   pool, in which case availability is ignored rather than leaving the PR
+   unassigned. Availability-blind assignment is a documented way to make PRs
+   stall with nobody noticing.
+2. Score expertise by commits touching the changed files (the ten largest files
+   in the diff, 30 commits back each). Candidates with at least one commit form
+   the expert set; if nobody qualifies, the whole pool is used.
+3. Sort by open review load ascending, then expertise descending, then login for
+   a stable tiebreak.
+
+**Balancing load *within* the expert set rather than across everyone is the
+load-bearing detail.** Meta found that recommending a low-workload but
+inappropriate reviewer just made authors scroll down the list and pick someone
+else — the balancing evaporates. Restricting it to people who know the code keeps
+it effective. The PR author is always excluded, and the picks' commit counts and
+queue depths are logged so a surprising choice is explainable.
+
+`strategy: rotation` restores the older behavior — `PR number % pool size`,
+deterministic and even over time, but blind to expertise and queue depth. Teams
+that want GitHub's native load-balancing can empty `pool` and use a team's
+auto-assignment; the gate and tiering still work.
 
 ---
 
@@ -395,9 +411,12 @@ Full syntax: [configuration.md](configuration.md).
 
 Ordered by expected value, from the research that shaped the current design.
 
-**Expertise-aware assignment.** See §7 — deterministic rotation is a form of
-round robin, and round robin ignores queue depth and availability. The evidence
-favors load-balancing within the expert set rather than across everyone.
+**Verified end to end.** Every runtime path that talks to GitHub or the Anthropic
+API is exercised only by opening a real PR. The unit tests cover the pure logic
+and the fail-safe branches; the API request shapes (the verifier's structured
+output in particular) are unproven until the first live run. Verification failing
+cannot let a merge through — it marks findings *not verified* and blocks — so the
+failure mode is noise, not a hole.
 
 **Mentorship protection.** The most-cited soft failure of AI review is juniors
 who stop learning: submit, get AI feedback, apply, merge. It shows up months

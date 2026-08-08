@@ -130,16 +130,30 @@ review:
       Anything you cannot point at a specific changed line for.
 
 # ---------------------------------------------------------------------------
-# GitHub logins treated as AI reviewers by the merge gate.
+# Which GitHub logins the gate treats as AI reviewers.
 # "[bot]" suffixes are stripped and case is ignored before matching.
-# "github-actions" covers claude-code-action runs that post with GITHUB_TOKEN.
+#
+# ai_reviewers        participate in the severity contract: their findings can
+#                     block the merge.
+# advisory_reviewers  count as "a review happened" (so require_ai_review is
+#                     satisfied) and show up in the summary, but can NEVER block
+#                     regardless of tags or severity.default.
+#
+# Copilot belongs in advisory: GitHub documents that Copilot code review ignores
+# instructions that change comment format, so it cannot be made to emit a
+# severity tag — and its native High/Medium/Low severity is UI metadata that no
+# API exposes. Leaving it gated would mean every Copilot comment inherits
+# severity.default, which silently turns them all into blockers if you ever set
+# that to a blocking tag.
 # ---------------------------------------------------------------------------
 ai_reviewers:
-  - copilot-pull-request-reviewer   # GitHub Copilot code review
-  - copilot
   - claude                          # Claude GitHub App
   - github-actions                  # claude-code-action posting via GITHUB_TOKEN
   - coderabbitai                    # CodeRabbit
+
+advisory_reviewers:
+  - copilot                         # GitHub Copilot code review
+  - copilot-pull-request-reviewer
 
 # ---------------------------------------------------------------------------
 # Human reviewer assignment (runs only after the AI gate passes).
@@ -153,6 +167,23 @@ reviewers:
   count: 1
   risk_count: 1     # e.g. 2 to require an extra pair of eyes on risky diffs
   risk_label: needs-human-review
+
+  # strategy: how the reviewer is chosen from the pool.
+  #   expertise — rank candidates by recent commits to the files this PR
+  #               changes, then pick the least-loaded of the people who
+  #               actually know the code. Load-balancing *across everyone*
+  #               backfires: authors just scroll past an unqualified
+  #               suggestion and pick someone else, so the balancing is lost.
+  #   rotation  — deterministic round robin (PR number modulo pool size).
+  #               Ignores both expertise and queue depth; use it only when the
+  #               pool is small and interchangeable.
+  strategy: expertise
+
+  # Skip reviewers whose GitHub status is set to "busy". Availability-blind
+  # assignment is a documented way to make PRs silently stall. If every
+  # candidate is busy, the filter is dropped rather than leaving the PR
+  # unassigned.
+  skip_unavailable: true
 
 # ---------------------------------------------------------------------------
 # Risk tiering.

@@ -18,6 +18,7 @@ import {
   parseSeverity,
   isBlocking,
   findingFingerprint,
+  isAdvisoryReviewer,
   matchesAny,
 } from "./lib/conventions.mjs";
 import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
@@ -206,6 +207,7 @@ const aiThreads = (await fetchReviewThreads())
       path: t.path,
       url: first.url,
       author: first.author.login,
+      advisory: isAdvisoryReviewer(first.author?.login, conventions),
       severity: parseSeverity(first.body, conventions),
       fingerprint: findingFingerprint(t.path, first.body, conventions),
       excerpt: String(first.body).replace(/\s+/g, " ").slice(0, 120),
@@ -252,8 +254,13 @@ const dismissed = new Set(
 const open = aiThreads.filter((t) => !t.resolved && !t.outdated);
 const resurrected = open.filter((t) => dismissed.has(t.fingerprint));
 const live = open.filter((t) => !dismissed.has(t.fingerprint));
-const claimed = live.filter((t) => isBlocking(t.severity, conventions));
-const nonBlocking = live.filter((t) => !isBlocking(t.severity, conventions));
+// Advisory reviewers cannot emit a severity tag reliably, so their comments
+// would otherwise all inherit severity.default — which turns them into blockers
+// the moment anyone sets that to a blocking tag. They are reported, never gated.
+const advisory = live.filter((t) => t.advisory);
+const gated = live.filter((t) => !t.advisory);
+const claimed = gated.filter((t) => isBlocking(t.severity, conventions));
+const nonBlocking = gated.filter((t) => !isBlocking(t.severity, conventions));
 
 // --- verification ---------------------------------------------------------
 
@@ -275,6 +282,7 @@ say(
   `AI review threads: ${aiThreads.length} total, ${blocking.length} blocking, ` +
     `${nonBlocking.length} unresolved non-blocking, ${resurrected.length} re-posted after dismissal` +
     (refuted.length ? `, ${refuted.length} refuted by verification` : "") +
+    (advisory.length ? `, ${advisory.length} advisory (never blocking)` : "") +
     "."
 );
 

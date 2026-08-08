@@ -42,10 +42,13 @@ export function loadConventions(root = repoRoot()) {
   doc.review.blocker_requires_fix ??= false;
   doc.review.suppress ??= [];
   doc.ai_reviewers ??= [];
+  doc.advisory_reviewers ??= [];
   doc.reviewers ??= {};
   doc.reviewers.pool ??= [];
   doc.reviewers.count ??= 1;
   doc.reviewers.risk_count ??= doc.reviewers.count;
+  doc.reviewers.strategy ??= "expertise";
+  doc.reviewers.skip_unavailable ??= true;
   doc.risk_paths ??= [];
   doc.risk_reviewers ??= [];
   doc.exempt_paths ??= [];
@@ -130,6 +133,19 @@ export function validateConventions(doc, file = "review-conventions.yml") {
   strArray(doc.review.suppress, "review.suppress");
 
   strArray(doc.ai_reviewers, "ai_reviewers");
+  strArray(doc.advisory_reviewers, "advisory_reviewers");
+  const gatedSet = new Set(doc.ai_reviewers.map((l) => normalizeLogin(l)));
+  for (const l of doc.advisory_reviewers) {
+    if (gatedSet.has(normalizeLogin(l))) {
+      errors.push(`"${l}" is in both ai_reviewers and advisory_reviewers — pick one`);
+    }
+  }
+  if (!["expertise", "rotation"].includes(doc.reviewers.strategy)) {
+    errors.push('reviewers.strategy must be "expertise" or "rotation"');
+  }
+  if (typeof doc.reviewers.skip_unavailable !== "boolean") {
+    errors.push("reviewers.skip_unavailable must be true or false");
+  }
   strArray(doc.reviewers.pool, "reviewers.pool");
   strArray(doc.risk_reviewers, "risk_reviewers");
   strArray(doc.risk_paths, "risk_paths");
@@ -177,9 +193,21 @@ export function normalizeLogin(login) {
   return String(login || "").toLowerCase().replace(/\[bot\]$/, "");
 }
 
+// Any AI reviewer, gated or advisory — used to tell "a review happened" from
+// "nobody reviewed", and to keep bots out of the human reviewer count.
 export function isAiReviewer(login, conventions) {
   const norm = normalizeLogin(login);
-  return conventions.ai_reviewers.some((l) => normalizeLogin(l) === norm);
+  return (
+    conventions.ai_reviewers.some((l) => normalizeLogin(l) === norm) ||
+    conventions.advisory_reviewers.some((l) => normalizeLogin(l) === norm)
+  );
+}
+
+// Advisory reviewers are reported but can never block, whatever they tag their
+// comments with. See advisory_reviewers in review-conventions.yml.
+export function isAdvisoryReviewer(login, conventions) {
+  const norm = normalizeLogin(login);
+  return conventions.advisory_reviewers.some((l) => normalizeLogin(l) === norm);
 }
 
 // --- severity parsing -----------------------------------------------------

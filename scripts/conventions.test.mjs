@@ -13,6 +13,7 @@ import {
   parseSeverity,
   isBlocking,
   isAiReviewer,
+  isAdvisoryReviewer,
   normalizeLogin,
   globToRegExp,
   matchesAny,
@@ -93,6 +94,21 @@ test("humans are not treated as AI reviewers", () => {
   assert.ok(!isAiReviewer("alice", base));
   assert.ok(!isAiReviewer("", base));
   assert.ok(!isAiReviewer(undefined, base));
+  assert.ok(!isAdvisoryReviewer("alice", base));
+});
+
+test("advisory reviewers count as AI but are never gated", () => {
+  // Copilot cannot be made to emit a severity tag, so gating it would mean
+  // every one of its comments inherits severity.default.
+  assert.ok(isAiReviewer("Copilot", base), "still counts as a review happening");
+  assert.ok(isAdvisoryReviewer("copilot[bot]", base), "but never blocks");
+  assert.ok(isAiReviewer("claude", base));
+  assert.ok(!isAdvisoryReviewer("claude", base), "Claude is gated");
+});
+
+test("a login cannot be both gated and advisory", () => {
+  const conflicted = clone({ advisory_reviewers: ["claude"] });
+  assert.throws(() => validateConventions(conflicted), /both ai_reviewers and advisory_reviewers/);
 });
 
 // --- glob matching --------------------------------------------------------
@@ -188,6 +204,15 @@ test("reviewer counts must be non-negative integers", () => {
     assert.throws(() => validateConventions(clone({ reviewers: patch })), /reviewers\./);
   }
   assert.doesNotThrow(() => validateConventions(clone({ reviewers: { count: 0 } })));
+});
+
+test("assignment strategy is validated and defaults to expertise", () => {
+  assert.equal(base.reviewers.strategy, "expertise");
+  assert.equal(base.reviewers.skip_unavailable, true);
+  for (const patch of [{ strategy: "random" }, { skip_unavailable: "yes" }]) {
+    assert.throws(() => validateConventions(clone({ reviewers: patch })), /reviewers\./);
+  }
+  assert.doesNotThrow(() => validateConventions(clone({ reviewers: { strategy: "rotation" } })));
 });
 
 // --- review discipline rendering ------------------------------------------

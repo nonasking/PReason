@@ -167,12 +167,31 @@ well-tuned reviewer runs at 1–2 findings per review.
 Set any flag to `false`, or `max_comments: 0` / `suppress: []`, to drop that
 section from the generated instructions.
 
-## `ai_reviewers` — who counts as an AI
+## `ai_reviewers` / `advisory_reviewers` — who counts as an AI
 
-GitHub logins whose review threads the gate manages. `[bot]` suffixes are
-stripped and case is ignored, so `Copilot`, `copilot[bot]`, `copilot` all
-match. Add the login of any other review bot you run; remove entries to make
-the gate ignore that tool.
+```yaml
+ai_reviewers: [claude, github-actions, coderabbitai]
+advisory_reviewers: [copilot, copilot-pull-request-reviewer]
+```
+
+Both lists match with `[bot]` suffixes stripped and case ignored, so `Copilot`,
+`copilot[bot]`, and `copilot` are the same login. A login may appear in only one
+of the two lists.
+
+| List | Satisfies `require_ai_review` | Can block the merge |
+|---|:-:|:-:|
+| `ai_reviewers` | ✅ | ✅ |
+| `advisory_reviewers` | ✅ | ❌ never |
+
+**Copilot belongs in `advisory_reviewers`.** GitHub documents that Copilot code
+review ignores instructions that change comment format, so it cannot be made to
+emit a severity tag — and its native High/Medium/Low severity is UI metadata that
+no API exposes. Gated, every Copilot comment would inherit `severity.default`,
+which silently turns them all into blockers the moment you set that to a blocking
+tag. Advisory keeps its findings visible and counted without that trap.
+
+Put a reviewer here whenever you want its output surfaced but not enforced —
+a new tool you're evaluating, for instance.
 
 ## `reviewers` — how many humans, and who
 
@@ -182,19 +201,52 @@ reviewers:
   count: 1                    # reviewers per normal PR (0 = no human assignment)
   risk_count: 2               # reviewers per risk-path PR (defaults to count)
   risk_label: needs-human-review
+  strategy: expertise         # expertise | rotation
+  skip_unavailable: true      # skip reviewers whose GitHub status is "busy"
 ```
 
 - **Adjust reviewer count** with `count`; `risk_count` lets risky diffs demand
   more eyes than routine ones.
 - **`count: 0`** turns off human assignment entirely (AI + gate only) — e.g.
   for a personal or prototype repo.
-- The pick is deterministic — `PR number % pool size`, walking forward for
-  multi-reviewer counts — so re-running the workflow never reshuffles, and
-  assignment stays evenly distributed over time. The PR author is excluded
-  automatically.
+- The PR author is always excluded, and assignment is skipped entirely if a human
+  reviewer is already requested or has already reviewed.
 - Prefer GitHub's native team load-balancing? Leave `pool` empty and enable
   *Team → Code review → Auto assignment*; the gate, labels, and tiering still
   work.
+
+### `strategy: expertise` (default)
+
+Ranks candidates by who has actually touched the files this PR changes, then
+picks the **least-loaded person within that group**:
+
+1. Drop anyone whose GitHub status is "busy" (`skip_unavailable`). If that would
+   empty the pool, the filter is dropped rather than leaving the PR unassigned —
+   availability-blind assignment is a documented way to make PRs stall silently.
+2. Count commits touching the changed files, from the ten largest files in the
+   diff, looking back 30 commits each. Pool members with at least one commit form
+   the expert set; if nobody qualifies (new area, new hire) the whole pool is
+   used and a note is logged.
+3. Sort the expert set by open review load (ascending), then expertise
+   (descending), then login — so re-runs pick the same person.
+
+The chosen reviewers' commit counts and open review load are printed in the job
+log, so a surprising pick is explainable.
+
+**Why balance load *within* the expert set rather than across everyone:** an
+author who receives an unqualified suggestion scrolls past it and picks someone
+else, and the balancing is lost. Restricting the balancing to people who know the
+code keeps it effective.
+
+Costs: one API call per sampled file (≤10) plus one page of open PRs plus one
+batched GraphQL call for availability.
+
+### `strategy: rotation`
+
+Deterministic round robin — `PR number % pool size`, walking forward for
+multi-reviewer counts. Even over time and stable across re-runs, but blind to
+both expertise and queue depth. Reasonable when the pool is small and genuinely
+interchangeable; otherwise prefer `expertise`.
 
 ## Risk tiering — `risk_paths`, `risk_reviewers`, `exempt_paths`
 
