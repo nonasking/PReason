@@ -22,6 +22,11 @@ import {
   matchesAny,
 } from "./lib/conventions.mjs";
 import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
+import {
+  parseVerdictCache,
+  buildGateComment,
+  isGateComment,
+} from "./lib/gate-report.mjs";
 
 const token = process.env.GITHUB_TOKEN;
 const [owner, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
@@ -111,6 +116,34 @@ if (isFork) {
   finish(0);
 }
 
+// --- the gate's sticky comment -------------------------------------------
+
+// The report is mirrored into a PR comment (authors don't read the Actions
+// tab), which also carries the verdict cache. Best-effort: a comment failure
+// never changes the verdict.
+const issueComments = await rest(`/issues/${prNumber}/comments?per_page=100`).catch(() => []);
+const gateComment = issueComments.find((c) => isGateComment(c.body)) ?? null;
+const verdictCache = parseVerdictCache(gateComment?.body);
+
+async function postReport(verdicts = verdictCache) {
+  const body = buildGateComment(report.join("\n"), verdicts);
+  try {
+    if (gateComment) {
+      await rest(`/issues/comments/${gateComment.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ body }),
+      });
+    } else {
+      await rest(`/issues/${prNumber}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+    }
+  } catch (e) {
+    console.error(`(could not post gate report comment: ${e.message})`);
+  }
+}
+
 // --- PR size --------------------------------------------------------------
 
 // Fetched here rather than in the assigner because the gate needs the per-file
@@ -158,6 +191,7 @@ if (overLines || overFiles) {
       "_Generated and vendored paths are already excluded from the count " +
         "(`size.exclude`). Adjust `size.max_changed_lines` if the limit is wrong for this repo._"
     );
+    await postReport();
     finish(1);
   }
   say(`⚠️ Large PR: ${limits.join(", ")}. Expect weaker review, from humans and AI alike.`);
@@ -210,6 +244,7 @@ const aiThreads = (await fetchReviewThreads())
       advisory: isAdvisoryReviewer(first.author?.login, conventions),
       severity: parseSeverity(first.body, conventions),
       fingerprint: findingFingerprint(t.path, first.body, conventions),
+      body: first.body, // the verifier judges the full finding, not the excerpt
       excerpt: String(first.body).replace(/\s+/g, " ").slice(0, 120),
     };
   })
@@ -220,13 +255,13 @@ const aiThreads = (await fetchReviewThreads())
 if (conventions.gate.require_ai_review && aiThreads.length === 0) {
   // A reviewer that failed silently looks exactly like a clean review. Check
   // whether any AI reviewer left *any* trace before trusting "no findings".
-  const [reviews, issueComments] = await Promise.all([
-    rest(`/pulls/${prNumber}/reviews?per_page=100`),
-    rest(`/issues/${prNumber}/comments?per_page=100`),
-  ]);
+  // The gate's own report comment is excluded — it is posted by github-actions,
+  // which is also how claude-code-action posts, and counting it would satisfy
+  // this check forever after the first gate run.
+  const reviews = await rest(`/pulls/${prNumber}/reviews?per_page=100`);
   const sawAi =
     reviews.some((r) => isAiReviewer(r.user?.login, conventions)) ||
-    issueComments.some((c) => isAiReviewer(c.user?.login, conventions));
+    issueComments.some((c) => isAiReviewer(c.user?.login, conventions) && !isGateComment(c.body));
 
   if (!sawAi) {
     say("**No AI reviewer has posted on this PR.**");
@@ -239,6 +274,7 @@ if (conventions.gate.require_ai_review && aiThreads.length === 0) {
     say("");
     say("Check the AI review workflow run, then push or re-run to retry.");
     say("_(Set `gate.require_ai_review: false` if this repo intentionally runs no AI reviewer.)_");
+    await postReport();
     finish(1);
   }
 }
@@ -267,11 +303,38 @@ const nonBlocking = gated.filter((t) => !isBlocking(t.severity, conventions));
 // A blocking tag is the reviewing model's own severity judgement. Give each
 // claim an adversarial second opinion before it holds the merge; anything the
 // verifier cannot refute (including anything it fails to check) still blocks.
-const verified = await verifyBlockers(claimed, {
+//
+// Verdicts are sticky: a finding judged on an earlier run keeps its verdict
+// (via the cache in the gate's PR comment) instead of being re-judged on every
+// event. Model calls are not deterministic — without this, verdicts could flip
+// between runs and the gate would flap with no code change. Only settled
+// verdicts are cached; "unverified" retries next run.
+const cachedResults = [];
+const toVerify = [];
+for (const f of claimed) {
+  const hit = verdictCache[f.fingerprint];
+  if (hit && (hit.status === "confirmed" || hit.status === "refuted")) {
+    cachedResults.push({ ...f, verdict: { ...hit, cached: true } });
+  } else {
+    toVerify.push(f);
+  }
+}
+const fresh = await verifyBlockers(toVerify, {
   conventions,
   patchesByPath,
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+const verified = [...cachedResults, ...fresh];
+
+// Cache only what's still live, so the comment doesn't grow without bound.
+const nextVerdicts = {};
+for (const f of verified) {
+  if (f.verdict.status === "confirmed" || f.verdict.status === "refuted") {
+    const { cached, ...verdict } = f.verdict;
+    nextVerdicts[f.fingerprint] = verdict;
+  }
+}
+
 const blocking = verified.filter(blocksMerge);
 const refuted = verified.filter((t) => !blocksMerge(t));
 const unverified = blocking.filter((t) => t.verdict.status === "unverified");
@@ -342,9 +405,11 @@ if (blocking.length) {
         `A verifier that fails should never make the gate more permissive._`
     );
   }
+  await postReport(nextVerdicts);
   finish(1);
 }
 
 say("");
 say("No blocking AI comments — gate passed.");
+await postReport(nextVerdicts);
 finish(0);

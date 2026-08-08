@@ -55,8 +55,10 @@ reviewer's five minutes actually sufficient.
 ## Quickstart
 
 1. **Use this repo as a template** (or copy `review-conventions.yml`,
-   `scripts/`, `.github/workflows/`, and `package.json` into an existing repo).
-   PReason has no runtime of its own — it is these files plus one dependency.
+   `scripts/`, `.github/workflows/`, and `package.json` into an existing repo —
+   for a JS project, merge the `scripts` and `dependencies` into your own
+   `package.json` instead). PReason has no runtime of its own — it is these
+   files plus two small dependencies (`js-yaml`, `@anthropic-ai/sdk`).
 
 2. **Edit `review-conventions.yml`** — your rules, your risk paths, your
    reviewer pool:

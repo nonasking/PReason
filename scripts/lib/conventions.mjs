@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 
 export const MARKER_START = "<!-- preason:conventions:start -->";
@@ -8,7 +9,9 @@ export const GENERATED_NOTICE =
   "Generated from review-conventions.yml by scripts/sync-conventions.mjs — do not edit by hand.";
 
 export function repoRoot() {
-  return path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+  // fileURLToPath, not URL.pathname: the latter percent-encodes spaces and
+  // breaks on Windows drive letters, so a clone under "~/My Projects" fails.
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 export function loadConventions(root = repoRoot()) {

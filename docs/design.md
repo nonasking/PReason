@@ -235,6 +235,17 @@ else. Diff-only context is deliberate: on published benchmarks review models get
 monotonically *worse* as surrounding context is added, and it is also the
 cheapest option. Refuted findings stay visible in the summary, collapsed.
 
+**Verdicts are sticky.** The gate mirrors its report into a PR comment (authors
+don't read the Actions tab; a red check whose reason takes three clicks to find
+reads as flaky CI), and that comment carries a hidden per-finding verdict cache.
+A finding judged once keeps its verdict until its thread is resolved. Without
+this, every event would re-bill verification for still-open blockers — and since
+model calls are not deterministic, a verdict could flip between runs and the
+gate would flap with no code change. Only settled verdicts are cached;
+`unverified` retries on the next run. The gate's own comment is excluded from
+the fail-closed "did any AI post?" check, since it shares the `github-actions`
+login with claude-code-action.
+
 Everything fails safe: a missing `ANTHROPIC_API_KEY`, an API error, a safety
 refusal, or unparseable output all leave the finding blocking and marked *not
 verified*. A broken verifier makes the gate noisier, never more permissive.
@@ -259,15 +270,35 @@ resolving a thread cannot re-run the gate by itself.
 | Replying in a review thread | ✅ |
 | Commenting on the PR | ✅ |
 | Pushing a fix | ✅ |
-| An AI reviewer submitting a review | ✅ |
+| The Claude review workflow finishing | ✅ (`workflow_run`) |
+| An AI reviewer submitting a review via a GitHub App | ✅ |
 | Toggling `gate.recheck_label` | ✅ (manual escape hatch) |
 | Resolving a thread with no reply | ❌ |
+
+The `workflow_run` trigger closes a subtle hole: **events created with the
+workflow `GITHUB_TOKEN` do not trigger workflows.** When claude-code-action
+posts its review with that token, the resulting comment events would never
+re-run the gate — the gate would sit red on "no AI review yet" until the author
+happened to push or comment. Re-running when the review workflow *completes*
+covers it regardless of how the review was posted, and also settles the
+ordering race between the review and the first gate run.
 
 This lands in a defensible place: the rebuttal you actually write is what clears
 the gate, which is the behavior the design wants anyway. For exact re-runs on
 resolution, run a receiver subscribed to the webhook that fires
 `repository_dispatch` with type `review-thread-changed` and
 `client_payload.pr_number` — the workflow already accepts it.
+
+### The gate runs trusted code, not PR code
+
+On `pull_request` events the default checkout is the PR merge ref — which would
+let any PR weaken `review-conventions.yml` or the gate script itself and then
+pass its own weakened gate. The gate job therefore checks out the **default
+branch** and runs the scripts and conventions from there, whatever the PR
+contains. Consequence: a PR that changes the conventions is still gated under
+the *old* rules; the change takes effect on subsequent PRs. (This matches how
+`claude-code-action` treats `CLAUDE.md`, and turns the "two-merge rollout" for
+convention changes from a caveat into the defined behavior.)
 
 ### Known limit: the author can resolve their own threads
 

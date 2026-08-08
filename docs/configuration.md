@@ -97,7 +97,10 @@ its only context; only survivors hold the merge. Refuted findings are still
 listed in the gate summary (collapsed), so nothing disappears silently.
 
 Requires the `ANTHROPIC_API_KEY` secret. Cost scales with the number of
-*blocking* findings, not PRs — on a healthy repo that is a handful a week.
+*blocking* findings, not PRs — on a healthy repo that is a handful a week. And
+each finding is judged **once**: the verdict is cached in the gate's PR comment
+and reused on every later run until the thread is resolved, so re-runs neither
+re-bill nor flip verdicts.
 
 **It fails safe in every direction.** A missing key, an API error, a safety
 refusal, or malformed output all leave the finding blocking, and the summary

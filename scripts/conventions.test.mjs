@@ -24,6 +24,13 @@ import {
   spliceMarkedBlock,
 } from "./lib/conventions.mjs";
 import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
+import {
+  renderVerdictCache,
+  parseVerdictCache,
+  buildGateComment,
+  isGateComment,
+  REPORT_MARKER,
+} from "./lib/gate-report.mjs";
 
 const base = loadConventions();
 const clone = (patch = {}) => {
@@ -302,6 +309,39 @@ test("size config is validated", () => {
     assert.throws(() => validateConventions(clone({ size: patch })), /size\./);
   }
   assert.doesNotThrow(() => validateConventions(clone({ size: { max_changed_lines: 0 } })));
+});
+
+// --- gate report comment and verdict cache --------------------------------
+
+test("verdict cache round-trips through the comment body", () => {
+  const verdicts = {
+    "src/a.js::money float": { status: "refuted", reason: "already integer cents", confidence: "high" },
+    "src/b.js::race": { status: "confirmed", reason: "unsynchronized write", votes: "2/3" },
+  };
+  const body = buildGateComment("## Review gate\n\nreport text", verdicts);
+  assert.ok(isGateComment(body));
+  assert.deepEqual(parseVerdictCache(body), verdicts);
+});
+
+test("model prose cannot break out of the cache comment", () => {
+  // A literal "-->" in a verdict reason would otherwise end the HTML comment
+  // and dump JSON into the visible report.
+  const verdicts = { fp: { status: "refuted", reason: 'the arrow --> and "quotes" and <tags>' } };
+  const rendered = renderVerdictCache(verdicts);
+  assert.ok(!rendered.slice(4, -3).includes("-->"), "payload contains no comment terminator");
+  assert.deepEqual(parseVerdictCache(rendered), verdicts);
+});
+
+test("a mangled or missing cache degrades to empty, never throws", () => {
+  assert.deepEqual(parseVerdictCache(null), {});
+  assert.deepEqual(parseVerdictCache("no marker here"), {});
+  assert.deepEqual(parseVerdictCache("<!-- preason:verdicts !!!notbase64!!! -->"), {});
+  assert.deepEqual(parseVerdictCache(`<!-- preason:verdicts ${Buffer.from("[1,2]").toString("base64")} -->`), {});
+});
+
+test("ordinary comments are not mistaken for the gate report", () => {
+  assert.ok(!isGateComment("Looks good to me!"));
+  assert.ok(isGateComment(`${REPORT_MARKER}\nanything`));
 });
 
 // --- generated-block splicing ---------------------------------------------

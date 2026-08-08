@@ -75,7 +75,10 @@ function buildPrompt(finding, patch) {
 async function judgeOnce(client, model, finding, patch) {
   const response = await client.messages.create({
     model,
-    max_tokens: 2000,
+    // max_tokens caps thinking + answer together, and thinking is on by
+    // default on current models. Too tight a cap truncates mid-JSON, which
+    // reads as a verifier failure and blocks the finding unverified.
+    max_tokens: 8000,
     system: SYSTEM,
     messages: [{ role: "user", content: buildPrompt(finding, patch) }],
     output_config: {

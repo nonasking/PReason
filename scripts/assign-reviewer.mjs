@@ -85,12 +85,13 @@ const paths = files.map((f) => f.filename);
 const riskFiles = paths.filter((f) => matchesAny(f, conventions.risk_paths));
 
 if (riskFiles.length && conventions.reviewers.risk_label) {
+  // Best-effort: a label API failure must not abort reviewer assignment.
   await gh(`/issues/${prNumber}/labels`, {
     method: "POST",
     body: JSON.stringify({ labels: [conventions.reviewers.risk_label] }),
-  });
+  }).catch((e) => console.log(`(could not apply risk label: ${e.message})`));
   console.log(
-    `Risk paths touched (${riskFiles.length} file(s)) — applied label "${conventions.reviewers.risk_label}".`
+    `Risk paths touched (${riskFiles.length} file(s)) — label "${conventions.reviewers.risk_label}".`
   );
   for (const f of riskFiles.slice(0, 20)) console.log(`  - ${f}`);
 }
