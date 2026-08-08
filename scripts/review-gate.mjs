@@ -198,6 +198,21 @@ if (overLines || overFiles) {
   say("");
 }
 
+// --- risk labeling --------------------------------------------------------
+
+// Applied here rather than in assignment: the label describes what the PR
+// touches, and should be visible while the gate is still red — which is
+// exactly when a human deciding whether to step in early wants to see it.
+if (
+  conventions.reviewers.risk_label &&
+  files.some((f) => matchesAny(f.filename, conventions.risk_paths))
+) {
+  await rest(`/issues/${prNumber}/labels`, {
+    method: "POST",
+    body: JSON.stringify({ labels: [conventions.reviewers.risk_label] }),
+  }).catch(() => {});
+}
+
 // --- collect AI review threads -------------------------------------------
 
 async function fetchReviewThreads() {
