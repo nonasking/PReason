@@ -13,8 +13,14 @@
 // blocking. A broken verifier makes the gate noisier, never more permissive.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { globToRegExp } from "./conventions.mjs";
 
 const MAX_PATCH_CHARS = 24_000;
+
+// Bump when the judging standard changes: cached verdicts from an older
+// verifier are dropped and re-judged, instead of an old standard's verdict
+// sticking forever.
+export const VERIFIER_VERSION = 2;
 
 const VERDICT_SCHEMA = {
   type: "object",
@@ -44,24 +50,50 @@ handled elsewhere in the diff, based on a misreading, or real but not \
 merge-blocking. Blocking a merge has a real cost, and a reviewer that blocks on \
 weak findings gets ignored on strong ones.
 
-A finding is real only if ALL of these hold:
-- It describes a concrete defect, not a style preference or a hypothetical.
-- The defect is visible in the changed lines you were given, not assumed from \
-code you cannot see.
-- Shipping it would cause incorrect behavior, data loss, a security hole, or a \
-breaking change for callers.
+A finding is real if EITHER of these holds:
 
-Default to refuting. If you cannot point at the specific changed line that \
-causes the problem, it is not real. If the finding depends on an assumption \
-about code outside this diff, it is not real. If you are genuinely torn, set \
-confidence to "low" and explain what you would need to see.`;
+1. It describes a concrete defect: visible in the changed lines you were given \
+(not assumed from code you cannot see), and shipping it would cause incorrect \
+behavior, data loss, a security hole, or a breaking change for callers.
 
-function buildPrompt(finding, patch) {
+2. It enforces one of the team review rules provided below, and the rule's \
+condition is actually met by this change. Team rules are this repository's \
+definition of merge-blocking — a rule may demand process (for example, a \
+rollback plan stated in the PR description) rather than a code change, and \
+enforcing it is still real. Check the PR description you were given before \
+concluding a required statement is missing.
+
+Otherwise, default to refuting. If the finding is neither a defect you can pin \
+to a changed line nor the enforcement of a listed team rule, it is not real. \
+If you are genuinely torn, set confidence to "low" and explain what you would \
+need to see.`;
+
+// The team rules that apply to this file — the verifier must not refute a
+// finding for being "process, not a defect" when the process is exactly what
+// the team's conventions mandate for this path.
+function rulesForPath(conventions, path) {
+  return conventions.rules.scoped
+    .filter((scope) => globToRegExp(scope.applyTo).test(path || ""))
+    .flatMap((scope) => scope.rules);
+}
+
+function buildPrompt(finding, patch, { conventions, prTitle, prBody }) {
+  const rules = rulesForPath(conventions, finding.path);
   return [
     `File: ${finding.path}`,
     "",
     "Finding flagged as blocking:",
     finding.body.trim(),
+    "",
+    rules.length
+      ? ["Team review rules for this file:", ...rules.map((r) => `- ${r}`), ""].join("\n")
+      : "",
+    "Pull request title and description (verbatim):",
+    "```",
+    `${prTitle || "(no title)"}`,
+    "",
+    `${prBody || "(no description)"}`.slice(0, 4000),
+    "```",
     "",
     "The changed lines in this file:",
     "```diff",
@@ -69,10 +101,12 @@ function buildPrompt(finding, patch) {
     "```",
     "",
     "Is this finding real, by the standard in your instructions?",
-  ].join("\n");
+  ]
+    .filter((s) => s !== "")
+    .join("\n");
 }
 
-async function judgeOnce(client, model, finding, patch) {
+async function judgeOnce(client, model, finding, patch, ctx) {
   const response = await client.messages.create({
     model,
     // max_tokens caps thinking + answer together, and thinking is on by
@@ -80,7 +114,7 @@ async function judgeOnce(client, model, finding, patch) {
     // reads as a verifier failure and blocks the finding unverified.
     max_tokens: 8000,
     system: SYSTEM,
-    messages: [{ role: "user", content: buildPrompt(finding, patch) }],
+    messages: [{ role: "user", content: buildPrompt(finding, patch, ctx) }],
     output_config: {
       format: { type: "json_schema", schema: VERDICT_SCHEMA },
     },
@@ -97,9 +131,9 @@ async function judgeOnce(client, model, finding, patch) {
   return parsed;
 }
 
-async function judge(client, model, votes, finding, patch) {
+async function judge(client, model, votes, finding, patch, ctx) {
   const attempts = await Promise.allSettled(
-    Array.from({ length: votes }, () => judgeOnce(client, model, finding, patch))
+    Array.from({ length: votes }, () => judgeOnce(client, model, finding, patch, ctx))
   );
   const verdicts = attempts.filter((a) => a.status === "fulfilled").map((a) => a.value);
 
@@ -137,7 +171,7 @@ async function judge(client, model, votes, finding, patch) {
  * context is deliberate: on published benchmarks, review models get *worse*
  * monotonically as more surrounding context is added.
  */
-export async function verifyBlockers(findings, { conventions, patchesByPath, apiKey }) {
+export async function verifyBlockers(findings, { conventions, patchesByPath, apiKey, prTitle, prBody }) {
   const { enabled, model, votes } = conventions.verification;
 
   if (!enabled || !findings.length) {
@@ -163,7 +197,7 @@ export async function verifyBlockers(findings, { conventions, patchesByPath, api
         batch.map(async (f) => {
           const patch = (patchesByPath.get(f.path) || "").slice(0, MAX_PATCH_CHARS);
           try {
-            return { ...f, verdict: await judge(client, model, votes, f, patch) };
+            return { ...f, verdict: await judge(client, model, votes, f, patch, { conventions, prTitle, prBody }) };
           } catch (e) {
             return { ...f, verdict: { status: "unverified", reason: e.message } };
           }

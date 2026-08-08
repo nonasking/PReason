@@ -21,7 +21,7 @@ import {
   isAdvisoryReviewer,
   matchesAny,
 } from "./lib/conventions.mjs";
-import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
+import { verifyBlockers, blocksMerge, VERIFIER_VERSION } from "./lib/verify.mjs";
 import {
   parseVerdictCache,
   buildGateComment,
@@ -313,7 +313,13 @@ const cachedResults = [];
 const toVerify = [];
 for (const f of claimed) {
   const hit = verdictCache[f.fingerprint];
-  if (hit && (hit.status === "confirmed" || hit.status === "refuted")) {
+  // A cache hit from an older verifier version is discarded — when the judging
+  // standard changes, old verdicts must not stick forever.
+  if (
+    hit &&
+    hit.v === VERIFIER_VERSION &&
+    (hit.status === "confirmed" || hit.status === "refuted")
+  ) {
     cachedResults.push({ ...f, verdict: { ...hit, cached: true } });
   } else {
     toVerify.push(f);
@@ -323,6 +329,8 @@ const fresh = await verifyBlockers(toVerify, {
   conventions,
   patchesByPath,
   apiKey: process.env.ANTHROPIC_API_KEY,
+  prTitle: pr.title,
+  prBody: pr.body,
 });
 const verified = [...cachedResults, ...fresh];
 
@@ -331,7 +339,7 @@ const nextVerdicts = {};
 for (const f of verified) {
   if (f.verdict.status === "confirmed" || f.verdict.status === "refuted") {
     const { cached, ...verdict } = f.verdict;
-    nextVerdicts[f.fingerprint] = verdict;
+    nextVerdicts[f.fingerprint] = { ...verdict, v: VERIFIER_VERSION };
   }
 }
 
