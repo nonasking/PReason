@@ -35,10 +35,18 @@ review-conventions.yml            ← 단일 소스
    `.github/workflows/`, `package.json`을 기존 레포로 복사).
 2. `review-conventions.yml` 수정 — 팀 규칙, 위험 경로, 리뷰어 풀:
    ```yaml
+   severity:
+     tags: [blocker, warn, nit]  # 태그 어휘 자체를 팀 것으로 교체 가능
+     block_on: [blocker]         # warn까지 막으려면 [blocker, warn]
    reviewers:
      pool: [alice, bob, carol]
+     count: 1                    # PR당 리뷰어 수 (0 = 사람 배정 끔)
+     risk_count: 2               # 위험 경로는 2명
    risk_reviewers: [tech-lead]
+   exempt_paths: ["docs/**"]     # 전부 여기 해당하면 AI-only (사람 생략)
    ```
+   모든 커스텀 항목은 [docs/configuration.md](configuration.md) 참고. 설정이
+   틀리면 실행 시 오류 목록으로 한 번에 알려준다.
 3. 생성 파일 갱신 후 커밋: `npm install && npm run sync`
 4. Claude 리뷰를 쓰려면 레포 시크릿에 `ANTHROPIC_API_KEY` 추가
    (Copilot/CodeRabbit만 쓸 거면 `claude-review.yml` 삭제).

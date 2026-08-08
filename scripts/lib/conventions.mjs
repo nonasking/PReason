@@ -25,12 +25,91 @@ export function loadConventions(root = repoRoot()) {
   doc.reviewers ??= {};
   doc.reviewers.pool ??= [];
   doc.reviewers.count ??= 1;
+  doc.reviewers.risk_count ??= doc.reviewers.count;
   doc.risk_paths ??= [];
   doc.risk_reviewers ??= [];
+  doc.exempt_paths ??= [];
   doc.rules ??= { global: [], scoped: [] };
   doc.rules.global ??= [];
   doc.rules.scoped ??= [];
+  validateConventions(doc, file);
   return doc;
+}
+
+// Collects every problem at once so a customization round-trip is one edit,
+// not an error-by-error whack-a-mole. Runs on every load (sync, gate, assign).
+export function validateConventions(doc, file = "review-conventions.yml") {
+  const errors = [];
+  const isStr = (v) => typeof v === "string" && v.trim().length > 0;
+  const strArray = (v, name) => {
+    if (!Array.isArray(v) || v.some((x) => !isStr(x))) {
+      errors.push(`${name} must be a list of non-empty strings`);
+      return false;
+    }
+    return true;
+  };
+
+  if (strArray(doc.severity.tags, "severity.tags")) {
+    if (doc.severity.tags.length === 0) errors.push("severity.tags must not be empty");
+    const lower = doc.severity.tags.map((t) => t.toLowerCase());
+    if (new Set(lower).size !== lower.length) errors.push("severity.tags contains duplicates");
+    for (const t of doc.severity.tags) {
+      if (!/^[a-z0-9_-]+$/i.test(t)) {
+        errors.push(`severity tag "${t}" may only contain letters, digits, "_" and "-"`);
+      }
+    }
+    if (!lower.includes(String(doc.severity.default).toLowerCase())) {
+      errors.push(`severity.default "${doc.severity.default}" is not one of severity.tags`);
+    }
+    if (strArray(doc.severity.block_on, "severity.block_on")) {
+      for (const t of doc.severity.block_on) {
+        if (!lower.includes(t.toLowerCase())) {
+          errors.push(`severity.block_on entry "${t}" is not one of severity.tags`);
+        }
+      }
+    }
+  }
+
+  strArray(doc.ai_reviewers, "ai_reviewers");
+  strArray(doc.reviewers.pool, "reviewers.pool");
+  strArray(doc.risk_reviewers, "risk_reviewers");
+  strArray(doc.risk_paths, "risk_paths");
+  strArray(doc.exempt_paths, "exempt_paths");
+  for (const key of ["count", "risk_count"]) {
+    const v = doc.reviewers[key];
+    if (!Number.isInteger(v) || v < 0) {
+      errors.push(`reviewers.${key} must be an integer ≥ 0 (0 disables assignment)`);
+    }
+  }
+  if (doc.reviewers.risk_label != null && !isStr(doc.reviewers.risk_label)) {
+    errors.push("reviewers.risk_label must be a non-empty string (or omitted)");
+  }
+
+  strArray(doc.rules.global, "rules.global");
+  if (!Array.isArray(doc.rules.scoped)) {
+    errors.push("rules.scoped must be a list");
+  } else {
+    const names = new Set();
+    doc.rules.scoped.forEach((scope, i) => {
+      const at = `rules.scoped[${i}]`;
+      if (!isStr(scope?.name)) errors.push(`${at}.name is required`);
+      else if (!/^[a-z0-9_-]+$/i.test(scope.name)) {
+        errors.push(`${at}.name "${scope.name}" must be filename-safe (letters, digits, "_", "-")`);
+      } else if (names.has(scope.name.toLowerCase())) {
+        errors.push(`${at}.name "${scope.name}" is duplicated`);
+      } else {
+        names.add(scope.name.toLowerCase());
+      }
+      if (!isStr(scope?.applyTo)) errors.push(`${at}.applyTo (glob) is required`);
+      strArray(scope?.rules ?? null, `${at}.rules`);
+    });
+  }
+
+  if (errors.length) {
+    throw new Error(
+      `Invalid ${file}:\n` + errors.map((e) => `  - ${e}`).join("\n")
+    );
+  }
 }
 
 // --- login matching -------------------------------------------------------

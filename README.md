@@ -51,8 +51,16 @@ gate makes the single human reviewer's five minutes actually sufficient.
    ```yaml
    reviewers:
      pool: [alice, bob, carol]   # random-pick candidates
+     count: 1                    # reviewers per PR (0 = AI + gate only)
+     risk_count: 2               # extra eyes on risky diffs
    risk_reviewers: [tech-lead]   # gets risk-path PRs instead
+   exempt_paths: ["docs/**"]     # AI-only tier: no human assigned
    ```
+
+   Every knob — custom severity tags, gate strictness, reviewer counts, risk
+   and exempt tiers, path-scoped rules — is documented in
+   [docs/configuration.md](docs/configuration.md). The loader validates the
+   file on every run, so a misconfiguration fails with a readable error list.
 
 3. **Regenerate the tool configs** and commit everything:
 

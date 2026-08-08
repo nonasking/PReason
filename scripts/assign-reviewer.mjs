@@ -2,11 +2,14 @@
 // Reviewer assignment: runs after the AI gate passes.
 //
 //   1. If the diff touches a risk path  → apply the risk label and request
-//      risk_reviewers (falling back to the pool). Pair the label with a
-//      branch-protection rule to make human approval mandatory on these PRs.
-//   2. Otherwise                        → request `reviewers.count` reviewer(s)
+//      `reviewers.risk_count` reviewer(s) from risk_reviewers (falling back to
+//      the pool). Pair the label with a branch-protection rule to make human
+//      approval mandatory on these PRs.
+//   2. If every changed file matches `exempt_paths` → AI-only tier, no human
+//      reviewer is assigned.
+//   3. Otherwise                        → request `reviewers.count` reviewer(s)
 //      picked deterministically from the pool (PR number % pool size), so
-//      re-runs never reshuffle.
+//      re-runs never reshuffle. count 0 disables assignment.
 //
 // Idempotent: skips if a human reviewer was already requested or has reviewed.
 //
@@ -80,7 +83,24 @@ if (humanAlreadyInvolved) {
   process.exit(0);
 }
 
+// AI-only tier: docs, scripts, config — whatever exempt_paths says. Only when
+// the *entire* diff is exempt (and touches no risk path) is the human skipped.
+if (
+  !riskFiles.length &&
+  conventions.exempt_paths.length &&
+  files.every((f) => matchesAny(f, conventions.exempt_paths))
+) {
+  console.log("All changed files match exempt_paths — AI-only tier, no human reviewer assigned.");
+  process.exit(0);
+}
+
 // --- pick reviewers -------------------------------------------------------
+
+const wanted = riskFiles.length ? conventions.reviewers.risk_count : conventions.reviewers.count;
+if (wanted === 0) {
+  console.log("Reviewer count is 0 for this tier — human assignment disabled.");
+  process.exit(0);
+}
 
 const basePool = (riskFiles.length && conventions.risk_reviewers.length
   ? conventions.risk_reviewers
@@ -92,7 +112,7 @@ if (!basePool.length) {
   process.exit(0);
 }
 
-const count = Math.min(conventions.reviewers.count, basePool.length);
+const count = Math.min(wanted, basePool.length);
 const start = prNumber % basePool.length;
 const picked = Array.from({ length: count }, (_, i) => basePool[(start + i) % basePool.length]);
 

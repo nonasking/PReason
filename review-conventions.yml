@@ -38,24 +38,32 @@ ai_reviewers:
 
 # ---------------------------------------------------------------------------
 # Human reviewer assignment (runs only after the AI gate passes).
-# pool: GitHub usernames eligible for random assignment. Leave empty to skip.
+# pool:       GitHub usernames eligible for assignment. Leave empty to skip.
+# count:      reviewers per normal PR. 0 disables human assignment entirely.
+# risk_count: reviewers per risk-path PR (defaults to `count` if omitted).
 # The pick is deterministic (PR number modulo pool size) so re-runs are stable.
 # ---------------------------------------------------------------------------
 reviewers:
   pool: []          # e.g. [alice, bob, carol]
   count: 1
+  risk_count: 1     # e.g. 2 to require an extra pair of eyes on risky diffs
   risk_label: needs-human-review
 
 # ---------------------------------------------------------------------------
-# Risk paths: PRs touching these globs get `risk_label` and, if configured,
-# reviewers from `risk_reviewers` instead of the random pool. Pair the label
-# with a branch-protection rule to make human review mandatory on these paths.
+# Risk tiering.
+# risk_paths:   PRs touching these globs get `risk_label` and `risk_count`
+#               reviewers from `risk_reviewers` (falling back to the pool).
+#               Pair the label with a branch-protection rule to make human
+#               review mandatory on these paths.
+# exempt_paths: if EVERY changed file matches one of these globs (and none is
+#               a risk path), the PR is AI-only — no human reviewer assigned.
 # ---------------------------------------------------------------------------
 risk_paths:
   - "**/migrations/**"
   - "**/payments/**"
   - "**/auth/**"
 risk_reviewers: []   # e.g. [tech-lead]; falls back to the random pool if empty
+exempt_paths: []     # e.g. ["docs/**", "**/*.md", "scripts/**"]
 
 # ---------------------------------------------------------------------------
 # The review rules themselves. `global` applies everywhere; each `scoped`
