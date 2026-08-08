@@ -1,0 +1,15 @@
+{
+  "name": "review-gate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Convention-as-code review pipeline: one source of review rules synced to every AI reviewer, an AI-comment merge gate, and single-human-reviewer assignment.",
+  "type": "module",
+  "scripts": {
+    "sync": "node scripts/sync-conventions.mjs",
+    "check": "node scripts/sync-conventions.mjs --check"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

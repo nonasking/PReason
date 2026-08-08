@@ -1,0 +1,50 @@
+# The merge gate + reviewer assignment pipeline:
+#
+#   AI reviews land  →  gate blocks while a [blocker] thread is unresolved
+#                    →  author fixes or rebuts, resolves the thread
+#                    →  gate passes  →  one human reviewer is auto-assigned
+#                       (risk paths escalate to the risk label / risk reviewers)
+#
+# Make "gate" a required status check in branch protection to enforce it.
+
+name: Review gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Re-runs when an AI comment thread is resolved or unresolved.
+  pull_request_review_thread:
+    types: [resolved, unresolved]
+  # Re-runs when an AI reviewer submits its review batch.
+  pull_request_review:
+    types: [submitted]
+
+concurrency:
+  group: review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  gate:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Check unresolved blocking AI comments
+        run: node scripts/review-gate.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+      - name: Assign human reviewer
+        run: node scripts/assign-reviewer.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}

@@ -1,0 +1,127 @@
+# review-conventions.yml — the single source of truth for this repo's review rules.
+#
+# Everything below is compiled into tool-specific config files by
+# `node scripts/sync-conventions.mjs`:
+#
+#   CLAUDE.md                            → Claude (claude-code-action)
+#   .github/copilot-instructions.md      → GitHub Copilot code review
+#   .github/instructions/*.instructions.md → Copilot path-scoped rules
+#   .coderabbit.yaml                     → CodeRabbit (optional)
+#
+# Never edit the generated files by hand — CI fails on drift.
+# The `severity` section is also read at runtime by the merge gate
+# (scripts/review-gate.mjs) and the reviewer assigner (scripts/assign-reviewer.mjs).
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# Severity contract: every AI review comment must start with one of these tags.
+# The merge gate blocks while any unresolved AI thread carries a `block_on` tag.
+# Untagged AI comments are treated as `default` (tools don't always comply).
+# ---------------------------------------------------------------------------
+severity:
+  tags: [blocker, warn, nit]
+  default: warn
+  block_on: [blocker]
+
+# ---------------------------------------------------------------------------
+# GitHub logins treated as AI reviewers by the merge gate.
+# "[bot]" suffixes are stripped and case is ignored before matching.
+# "github-actions" covers claude-code-action runs that post with GITHUB_TOKEN.
+# ---------------------------------------------------------------------------
+ai_reviewers:
+  - copilot-pull-request-reviewer   # GitHub Copilot code review
+  - copilot
+  - claude                          # Claude GitHub App
+  - github-actions                  # claude-code-action posting via GITHUB_TOKEN
+  - coderabbitai                    # CodeRabbit
+
+# ---------------------------------------------------------------------------
+# Human reviewer assignment (runs only after the AI gate passes).
+# pool: GitHub usernames eligible for random assignment. Leave empty to skip.
+# The pick is deterministic (PR number modulo pool size) so re-runs are stable.
+# ---------------------------------------------------------------------------
+reviewers:
+  pool: []          # e.g. [alice, bob, carol]
+  count: 1
+  risk_label: needs-human-review
+
+# ---------------------------------------------------------------------------
+# Risk paths: PRs touching these globs get `risk_label` and, if configured,
+# reviewers from `risk_reviewers` instead of the random pool. Pair the label
+# with a branch-protection rule to make human review mandatory on these paths.
+# ---------------------------------------------------------------------------
+risk_paths:
+  - "**/migrations/**"
+  - "**/payments/**"
+  - "**/auth/**"
+risk_reviewers: []   # e.g. [tech-lead]; falls back to the random pool if empty
+
+# ---------------------------------------------------------------------------
+# The review rules themselves. `global` applies everywhere; each `scoped`
+# entry applies to files matching its glob (Copilot gets these as
+# .github/instructions/<name>.review.instructions.md with applyTo frontmatter).
+# ---------------------------------------------------------------------------
+rules:
+  global:
+    - >-
+      Start every review comment with a severity tag as the first token:
+      [blocker], [warn], or [nit]. Comments without a tag are treated as [warn].
+    - >-
+      [blocker] means the PR must not merge as-is: correctness bugs, security
+      holes, data loss or corruption, breaking API changes, secrets in code.
+    - >-
+      [warn] means fix-worthy but mergeable: missing error handling on likely
+      failure paths, misleading names, missing tests for changed behavior.
+    - >-
+      [nit] means style or preference. Never mark formatting, naming taste,
+      or micro-optimizations higher than [nit].
+    - >-
+      Review the diff against the PR description. If the code does something
+      the description does not mention (scope creep, drive-by changes), point
+      it out as [warn].
+    - >-
+      Prefer few high-signal comments over many shallow ones. Do not restate
+      what the code does; only comment where something should change or a
+      genuine question exists.
+    - >-
+      When you suspect an N+1 query or unbounded loop over external data,
+      ask for query logs or measurements rather than asserting.
+
+  scoped:
+    - name: migrations
+      applyTo: "**/migrations/**"
+      rules:
+        - >-
+          [blocker] any destructive operation (DROP, DELETE, column removal,
+          type narrowing) unless the PR description states a rollback and
+          backfill plan.
+        - >-
+          Check that the migration is reversible, or that irreversibility is
+          explicitly acknowledged in the PR description.
+        - >-
+          Flag long-running migrations on large tables (full-table rewrites,
+          non-concurrent index builds) as [warn] with a suggested safer path.
+
+    - name: payments
+      applyTo: "**/payments/**"
+      rules:
+        - >-
+          [blocker] any retryable payment operation that is not idempotent
+          (missing idempotency key, non-transactional state change).
+        - >-
+          [blocker] amounts handled as floating point. Money must be integer
+          minor units or a decimal type.
+        - >-
+          Verify failure paths: what happens when the PG call times out after
+          the charge succeeded? Ask if the reconciliation path is unclear.
+
+    - name: auth
+      applyTo: "**/auth/**"
+      rules:
+        - >-
+          [blocker] tokens, passwords, or secrets logged, stored in plain
+          text, or returned in API responses.
+        - >-
+          Check authorization, not just authentication: does every new
+          endpoint verify the caller may act on the target resource?
