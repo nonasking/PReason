@@ -18,7 +18,9 @@ import {
   parseSeverity,
   isBlocking,
   findingFingerprint,
+  matchesAny,
 } from "./lib/conventions.mjs";
+import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
 
 const token = process.env.GITHUB_TOKEN;
 const [owner, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
@@ -106,6 +108,59 @@ if (isFork) {
     }).catch((e) => say(`\n_(could not apply label: ${e.message})_`));
   }
   finish(0);
+}
+
+// --- PR size --------------------------------------------------------------
+
+// Fetched here rather than in the assigner because the gate needs the per-file
+// patches for verification anyway.
+const files = [];
+for (let page = 1; ; page++) {
+  const chunk = await rest(`/pulls/${prNumber}/files?per_page=100&page=${page}`);
+  files.push(...chunk);
+  if (chunk.length < 100) break;
+}
+const patchesByPath = new Map(files.map((f) => [f.filename, f.patch || ""]));
+
+const counted = files.filter((f) => !matchesAny(f.filename, conventions.size.exclude));
+const changedLines = counted.reduce((n, f) => n + (f.additions || 0) + (f.deletions || 0), 0);
+const overLines =
+  conventions.size.max_changed_lines > 0 && changedLines > conventions.size.max_changed_lines;
+const overFiles =
+  conventions.size.max_changed_files > 0 && counted.length > conventions.size.max_changed_files;
+
+if (overLines || overFiles) {
+  const limits = [
+    overLines && `${changedLines} changed lines (limit ${conventions.size.max_changed_lines})`,
+    overFiles && `${counted.length} changed files (limit ${conventions.size.max_changed_files})`,
+  ].filter(Boolean);
+
+  if (conventions.size.label) {
+    await rest(`/issues/${prNumber}/labels`, {
+      method: "POST",
+      body: JSON.stringify({ labels: [conventions.size.label] }),
+    }).catch(() => {});
+  }
+
+  // Blocking here also saves the verification spend on a PR that has to be
+  // split anyway.
+  if (conventions.size.action === "block") {
+    say(`**This PR is too large to review: ${limits.join(", ")}.**`);
+    say("");
+    say(
+      "Review effectiveness falls off sharply with diff size — and so does AI review, " +
+        "which spends its budget before reaching the risky part. Split this into " +
+        "smaller pull requests."
+    );
+    say("");
+    say(
+      "_Generated and vendored paths are already excluded from the count " +
+        "(`size.exclude`). Adjust `size.max_changed_lines` if the limit is wrong for this repo._"
+    );
+    finish(1);
+  }
+  say(`⚠️ Large PR: ${limits.join(", ")}. Expect weaker review, from humans and AI alike.`);
+  say("");
 }
 
 // --- collect AI review threads -------------------------------------------
@@ -197,15 +252,40 @@ const dismissed = new Set(
 const open = aiThreads.filter((t) => !t.resolved && !t.outdated);
 const resurrected = open.filter((t) => dismissed.has(t.fingerprint));
 const live = open.filter((t) => !dismissed.has(t.fingerprint));
-const blocking = live.filter((t) => isBlocking(t.severity, conventions));
+const claimed = live.filter((t) => isBlocking(t.severity, conventions));
 const nonBlocking = live.filter((t) => !isBlocking(t.severity, conventions));
+
+// --- verification ---------------------------------------------------------
+
+// A blocking tag is the reviewing model's own severity judgement. Give each
+// claim an adversarial second opinion before it holds the merge; anything the
+// verifier cannot refute (including anything it fails to check) still blocks.
+const verified = await verifyBlockers(claimed, {
+  conventions,
+  patchesByPath,
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+const blocking = verified.filter(blocksMerge);
+const refuted = verified.filter((t) => !blocksMerge(t));
+const unverified = blocking.filter((t) => t.verdict.status === "unverified");
 
 // --- report ---------------------------------------------------------------
 
 say(
-  `AI review threads: ${aiThreads.length} total, ${blocking.length} unresolved blocking, ` +
-    `${nonBlocking.length} unresolved non-blocking, ${resurrected.length} re-posted after dismissal.`
+  `AI review threads: ${aiThreads.length} total, ${blocking.length} blocking, ` +
+    `${nonBlocking.length} unresolved non-blocking, ${resurrected.length} re-posted after dismissal` +
+    (refuted.length ? `, ${refuted.length} refuted by verification` : "") +
+    "."
 );
+
+if (conventions.review.max_comments > 0 && live.length > conventions.review.max_comments) {
+  say("");
+  say(
+    `_${live.length} open AI comments, over the stated budget of ` +
+      `${conventions.review.max_comments}. Volume is the most common reason teams stop ` +
+      `reading AI review — consider tightening \`review.suppress\`._`
+  );
+}
 
 if (resurrected.length) {
   say("");
@@ -215,24 +295,48 @@ if (resurrected.length) {
   );
 }
 
-if (blocking.length) {
+if (refuted.length) {
   say("");
-  say("### Unresolved blocking comments");
+  say("<details><summary>");
+  say(`Refuted by verification (${refuted.length}) — not blocking</summary>`);
   say("");
-  for (const t of blocking) {
-    say(`- **[${t.severity}]** \`${t.path}\` — ${t.excerpt}… ([thread](${t.url}))`);
+  for (const t of refuted) {
+    say(`- \`${t.path}\` — ${t.excerpt}…`);
+    say(`  - _${t.verdict.reason}_ (${t.verdict.votes ?? "1/1"} votes)`);
   }
   say("");
-  say(
-    "Fix the issue, or reply in the thread with your reasoning, then **resolve the thread**."
-  );
+  say("</details>");
+}
+
+if (blocking.length) {
+  say("");
+  say("### Blocking comments");
+  say("");
+  for (const t of blocking) {
+    const note =
+      t.verdict.status === "unverified"
+        ? ` — ⚠️ not verified (${t.verdict.reason}), blocking by default`
+        : t.verdict.reason
+          ? ` — verified: ${t.verdict.reason}`
+          : "";
+    say(`- **[${t.severity}]** \`${t.path}\` — ${t.excerpt}…${note} ([thread](${t.url}))`);
+  }
+  say("");
+  say("Fix the issue, or reply in the thread with your reasoning, then **resolve the thread**.");
   say(
     `Replying re-runs this check automatically. After a bare resolve with no reply, ` +
       `add or remove the \`${conventions.gate.recheck_label}\` label to re-run it.`
   );
+  if (unverified.length) {
+    say("");
+    say(
+      `_${unverified.length} finding(s) could not be verified, so they block by default. ` +
+        `A verifier that fails should never make the gate more permissive._`
+    );
+  }
   finish(1);
 }
 
 say("");
-say("No unresolved blocking AI comments — gate passed.");
+say("No blocking AI comments — gate passed.");
 finish(0);

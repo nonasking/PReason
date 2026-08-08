@@ -12,15 +12,20 @@ everything — so teams quietly fall back to rubber-stamp approvals. This repo i
 a template for a different deal:
 
 1. **AI does the first pass** (Claude, Copilot, CodeRabbit — any or all),
-   all reading the *same* rules with a mandatory severity tag on every comment.
-2. **A merge gate holds the PR** while any unresolved `[blocker]` comment
-   exists. The author fixes it, or rebuts it in a reply — either way they must
-   resolve the thread to proceed. No silently ignored AI feedback.
-3. **One human reviewer is auto-assigned** only after the gate passes. Their
+   all reading the *same* rules: a mandatory severity tag on every comment, a
+   comment budget, an explicit do-not-flag list, and permission to find nothing.
+2. **Every blocking finding is adversarially verified** before it holds the
+   merge — a second call is asked to refute it, and only survivors block. A
+   first-pass model's own severity judgement is not good enough to stop a merge,
+   and this is what keeps the gate from crying wolf.
+3. **A merge gate holds the PR** while any verified `[blocker]` is unresolved.
+   The author fixes it, or rebuts it in a reply — either way they must resolve
+   the thread to proceed. No silently ignored AI feedback.
+4. **One human reviewer is auto-assigned** only after the gate passes. Their
    job is not to re-read the diff; it is to review the *review* — the PR
-   description, the AI findings and how the author handled them, and the risk
-   spots. Diffs touching risk paths (payments, auth, migrations) get labeled
-   and escalated to designated reviewers.
+   description, the surviving findings and how the author handled them, and the
+   risk spots. Diffs touching risk paths (payments, auth, migrations) get
+   labeled and escalated to designated reviewers.
 
 ```
 review-conventions.yml            ← the single source of truth
@@ -31,17 +36,21 @@ review-conventions.yml            ← the single source of truth
               │
               ▼  AI reviews, every comment tagged [blocker]/[warn]/[nit]
    ┌─────────────────────────────┐
-   │ review-gate (status check)  │  unresolved [blocker] → check fails
-   └─────────────────────────────┘
+   │ verify   refute each blocker│  refuted → does not block (still shown)
+   ├─────────────────────────────┤
+   │ gate     (status check)     │  surviving [blocker] unresolved → fails
+   └─────────────────────────────┘  oversized diff → label, optionally fails
               │  gate passes
               ▼
    one human reviewer assigned    risk paths → label + designated reviewer
 ```
 
 The point isn't "set up AI review" — that's one workflow file. The point is
-that the conventions, the gate, and the human role are **one coherent system**:
-conventions force severity tags, severity tags make the gate precise, and the
-gate makes the single human reviewer's five minutes actually sufficient.
+that the conventions, the verifier, the gate, and the human role are **one
+coherent system**: conventions force severity tags and hold comment volume down,
+verification keeps weak findings from blocking, the gate makes the surviving
+ones impossible to ignore, and all of that is what makes the single human
+reviewer's five minutes actually sufficient.
 
 ## Quickstart
 
@@ -73,9 +82,12 @@ gate makes the single human reviewer's five minutes actually sufficient.
    npm run sync
    ```
 
-4. **Add the `ANTHROPIC_API_KEY` secret** (repo → Settings → Secrets) for the
-   Claude review workflow. Skip this if you only use Copilot/CodeRabbit —
-   delete `.github/workflows/claude-review.yml` in that case.
+4. **Add the `ANTHROPIC_API_KEY` secret** (repo → Settings → Secrets). It is
+   used twice: by the Claude review workflow, and by the gate to verify blocking
+   findings. If you only use Copilot/CodeRabbit, delete
+   `.github/workflows/claude-review.yml` but keep the key — verification is the
+   part that stops weak findings from blocking merges. Without a key, blocking
+   findings are marked *not verified* and block anyway.
 
 5. **Enable branch protection** on your default branch:
    - Required status check: `gate` (from the *Review gate* workflow) — this is

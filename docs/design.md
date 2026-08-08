@@ -84,13 +84,15 @@ review-conventions.yml ──[sync]──▶ CLAUDE.md (marked block)
 | `scripts/lib/conventions.mjs` | Loader + validator + shared logic: severity parsing, AI-login matching, glob matching, finding fingerprints, markdown rendering. |
 | `scripts/sync-conventions.mjs` | Compiles the YAML into every tool config. `--check` mode fails CI on drift. |
 | `scripts/review-gate.mjs` | The merge gate. |
+| `scripts/lib/verify.mjs` | Adversarial verification of blocking findings. Fails safe. |
 | `scripts/assign-reviewer.mjs` | Risk labeling and human reviewer assignment. |
 | `.github/workflows/claude-review.yml` | Claude first-pass review. |
 | `.github/workflows/review-gate.yml` | Gate, then assignment. |
 | `scripts/conventions.test.mjs` | Unit tests for the pure logic above (`npm test`). |
 | `.github/workflows/ci.yml` | Runs the unit tests and the drift check. |
 
-Runtime dependency: Node 20 and `js-yaml`. Nothing else.
+Runtime dependencies: Node 20, `js-yaml`, and `@anthropic-ai/sdk` (used only by
+the verifier). Nothing else.
 
 ### Generated files
 
@@ -119,12 +121,14 @@ PR opened / pushed
    └─▶ Review gate workflow
           │
           ├─ 1. preflight   draft → pass · fork → see 4.2
-          ├─ 2. collect     GraphQL reviewThreads, keep threads opened by an AI reviewer
-          ├─ 3. fail-closed no AI reviewer left any trace → FAIL
-          ├─ 4. dedup       drop re-posts of findings already resolved
-          ├─ 5. verdict     any unresolved blocking finding → FAIL
+          ├─ 2. size        over the limit → label, and FAIL if size.action is block
+          ├─ 3. collect     GraphQL reviewThreads, keep threads opened by an AI reviewer
+          ├─ 4. fail-closed no AI reviewer left any trace → FAIL
+          ├─ 5. dedup       drop re-posts of findings already resolved
+          ├─ 6. verify      each blocking finding gets an adversarial second opinion
+          ├─ 7. verdict     any surviving blocking finding → FAIL
           │
-          └─ 6. assign      (only reached when the gate passed)
+          └─ 8. assign      (only reached when the gate passed)
                  risk path      → label + risk_count reviewers from risk_reviewers
                  all exempt     → no human
                  otherwise      → count reviewers from pool
@@ -184,14 +188,21 @@ yourself.
 `scripts/review-gate.mjs`, run as the `gate` job. Make it a required status
 check for it to mean anything.
 
-**Step 2 — collect.** Review threads come from GraphQL (`isResolved` is not in
+**Step 2 — size.** Changed lines and files are counted with generated and
+vendored paths excluded (`size.exclude`). Over the limit, the PR is labeled;
+with `size.action: block` the gate fails here, which also avoids spending
+verification budget on a diff that has to be split anyway. The default is
+`warn`, so adopting the template never blocks an in-flight PR by surprise —
+`block` is the setting the evidence supports.
+
+**Step 3 — collect.** Review threads come from GraphQL (`isResolved` is not in
 REST), paginated at 100. A thread counts as an AI thread when its *first*
 comment's author matches `ai_reviewers`; `[bot]` suffixes are stripped and case
 is ignored. Only inline review threads participate — top-level PR comments and
 review summaries are not resolvable on GitHub, so they cannot take part in a
 resolve-to-proceed loop.
 
-**Step 3 — fail closed on a missing reviewer.** `claude-code-action` can exit 0
+**Step 4 — fail closed on a missing reviewer.** `claude-code-action` can exit 0
 having posted nothing (its comment MCP server failing to initialize is a known
 failure mode), and a depleted Copilot credit pool stops reviews org-wide. In
 both cases "no findings" and "the reviewer died" are indistinguishable. When
@@ -199,7 +210,7 @@ both cases "no findings" and "the reviewer died" are indistinguishable. When
 and PR comments for any AI trace before failing — so a genuinely clean review
 still passes.
 
-**Step 4 — dedup re-posted findings.** AI reviewers re-post findings the author
+**Step 5 — dedup re-posted findings.** AI reviewers re-post findings the author
 already declined: each re-run opens a *new* thread for the same comment, so a
 rebutted `[blocker]` would resurrect and re-block on every push. Resolved AI
 findings are fingerprinted and matching re-posts are ignored.
@@ -210,10 +221,26 @@ with the severity tag, code blocks, inline code, and punctuation stripped, and
 collide; a genuinely reworded finding does not, and is treated as new. Ignored
 re-posts are counted in the summary so the noise stays visible.
 
-**Step 5 — verdict.** Fails if any unresolved, non-outdated, non-deduped AI
-thread carries a tag in `severity.block_on`. Outdated threads (the diff hunk
-changed underneath) do not block — otherwise a force-push strands a permanent
-red check.
+**Step 6 — verify.** A blocking tag is the reviewing model's own severity
+judgement, and models rate findings more severe than humans do. Blocking merges
+on an unfiltered first pass is exactly how a reviewer earns the "resolve all
+without reading" response. So each blocking finding gets an independent call
+asked to **refute** it; only survivors hold the merge.
+
+The verifier sees the finding and the changed lines of that file — nothing
+else. Diff-only context is deliberate: on published benchmarks review models get
+monotonically *worse* as surrounding context is added, and it is also the
+cheapest option. Refuted findings stay visible in the summary, collapsed.
+
+Everything fails safe: a missing `ANTHROPIC_API_KEY`, an API error, a safety
+refusal, or unparseable output all leave the finding blocking and marked *not
+verified*. A broken verifier makes the gate noisier, never more permissive.
+Disable it with `verification.enabled: false` to gate on the first pass alone.
+
+**Step 7 — verdict.** Fails if any unresolved, non-outdated, non-deduped AI
+thread carries a tag in `severity.block_on` and survived verification. Outdated
+threads (the diff hunk changed underneath) do not block — otherwise a force-push
+strands a permanent red check.
 
 **How the author clears it.** Fix the code, or reply in the thread with the
 reasoning, then resolve the thread.
@@ -332,6 +359,12 @@ The job carries `timeout-minutes: 20`. Reviews have been reported hanging to the
 6-hour Actions cap around 20% of the time in some setups; an unbounded review
 pinning a required check is worse than a failed one.
 
+**Verification adds a second, much smaller bill.** It runs once per *blocking
+finding* — not per PR — and sees only the finding plus that file's patch, so
+each call is small. On a repo where blockers are rare, which is the intended
+steady state, this is noise next to the review itself. `verification.votes`
+multiplies it linearly.
+
 For comparison: Anthropic's hosted Code Review product is a different thing at a
 different price point ($15–25 per review). This pipeline uses the action.
 
@@ -346,6 +379,9 @@ reported at once rather than one per run.
 |---|---|
 | `severity` | Tag vocabulary, default for untagged comments, which tags block |
 | `gate` | `require_ai_review`, `recheck_label`, `fork_policy` |
+| `verification` | Whether blocking findings get a second opinion, and the model/votes |
+| `size` | Changed-line and file limits, warn vs block, exclusions |
+| `review` | Comment budget, evidence and fix requirements, the do-not-flag list |
 | `ai_reviewers` | Which GitHub logins the gate manages |
 | `reviewers` | `pool`, `count`, `risk_count`, `risk_label` |
 | `risk_paths` / `risk_reviewers` / `exempt_paths` | Tiering |
@@ -359,36 +395,9 @@ Full syntax: [configuration.md](configuration.md).
 
 Ordered by expected value, from the research that shaped the current design.
 
-**Verification pass before blocking.** The gate currently blocks on the model's
-*self-declared* severity, and AI severity distributions skew low relative to
-human judgment. Every production system that reaches usable precision adds a
-second stage — an adversarial filter, a confidence score, consensus across runs
-(self-aggregation across runs lifted F1 by ~44% on one benchmark). The intended
-design is a cheap second call that attempts to refute each `[blocker]`; only
-survivors block. This also removes the reason to make a human do that
-verification, which is where the anchoring damage comes from.
-
-**PR size gate.** Review effectiveness runs 80–90% under 200 lines and falls
-below 50% past 1,000; AI-assisted PRs are ~2.6× larger at p75. Worse, large PRs
-degrade *AI* review too — the token budget gets spent before the reviewer
-reaches the risky part. Every team that reports a working AI-review process has
-a mechanical size limit; this has none.
-
-**Comment budget and negative prompting.** A tuned in-house reviewer runs at
-~1.2 findings per review; typical hosted tools land at 10–30 per PR, and passing
-that threshold is the most-cited cause of teams abandoning AI review entirely.
-Two concrete techniques: enumerate explicitly what *not* to flag, and require
-evidence — "quote the offending line or the finding is dropped." Also make "no
-findings" an explicitly acceptable outcome; asked to find problems, models
-invent them.
-
-**Require an inline fix suggestion on blockers.** Across 54,791 agent review
-comments, attaching an inline code suggestion was the strongest predictor of a
-comment being acted on (OR 1.617), while explanation without a suggestion made
-action *less* likely (OR 0.593). Severity labeling was not itself a significant
-predictor — actionability is what moves behavior.
-
-**Expertise-aware assignment.** See §7.
+**Expertise-aware assignment.** See §7 — deterministic rotation is a form of
+round robin, and round robin ignores queue depth and availability. The evidence
+favors load-balancing within the expert set rather than across everyone.
 
 **Mentorship protection.** The most-cited soft failure of AI review is juniors
 who stop learning: submit, get AI feedback, apply, merge. It shows up months

@@ -18,9 +18,6 @@ reviews:
         Review the diff against the PR description. If the code does something the description does
         not mention (scope creep, drive-by changes), point it out as [warn].
 
-        Prefer few high-signal comments over many shallow ones. Do not restate what the code does;
-        only comment where something should change or a genuine question exists.
-
         When you suspect an N+1 query or unbounded loop over external data, ask for query logs or
         measurements rather than asserting.
     - path: '**/migrations/**'

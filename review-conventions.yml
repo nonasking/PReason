@@ -45,6 +45,91 @@ gate:
   fork_policy: skip   # skip | block
 
 # ---------------------------------------------------------------------------
+# Blocker verification.
+#
+# A blocking tag is the reviewing model's own opinion, and models systematically
+# rate findings more severe than humans do. Every AI review system that reaches
+# usable precision adds a second stage rather than trusting the first pass.
+#
+# When enabled, each blocking finding gets a second, adversarial call that is
+# asked to REFUTE it; only survivors hold the merge. Requires ANTHROPIC_API_KEY.
+# Fails safe in every direction: a missing key, an API error, a refusal, or
+# malformed output all leave the finding blocking.
+#
+# votes > 1 runs independent attempts and takes the majority — measurably more
+# accurate, and linearly more expensive. Blockers should be rare, so 3 is
+# affordable on most repos.
+# ---------------------------------------------------------------------------
+verification:
+  enabled: true
+  model: claude-opus-5
+  votes: 1
+
+# ---------------------------------------------------------------------------
+# PR size.
+#
+# Review effectiveness runs 80–90% under ~200 changed lines and falls below 50%
+# past ~1,000 — and large diffs degrade AI review too, since the reviewer's
+# budget is spent before it reaches the risky part. Every team that reports a
+# working AI-review process enforces a mechanical size limit.
+#
+# action: warn  → label only (default, so adopting this template never blocks
+#                 an in-flight PR by surprise)
+#         block → fail the gate. This is what the evidence actually supports;
+#                 switch to it once your team has agreed on the threshold.
+# max_* of 0 disables that check.
+# ---------------------------------------------------------------------------
+size:
+  max_changed_lines: 800
+  max_changed_files: 0
+  action: warn        # warn | block
+  label: oversized-pr
+  exclude:            # generated and vendored files don't count toward size
+    - "**/*.lock"
+    - "**/package-lock.json"
+    - "**/*.snap"
+    - "**/generated/**"
+    - "**/vendor/**"
+
+# ---------------------------------------------------------------------------
+# Review discipline — rendered into every AI reviewer's instructions.
+#
+# Volume is the most-cited reason teams abandon AI review: past some number of
+# comments per PR, people start resolving without reading, and then the tool's
+# CORRECT findings get ignored too. Hosted tools commonly land at 10–30 comments
+# per PR; a well-tuned reviewer runs at ~1–2 findings per review.
+#
+# suppress is negative prompting: naming what NOT to flag works far better than
+# asking for "high-signal comments". Asked to find problems, a model will invent
+# them — so allow_no_findings makes an empty review an explicitly correct answer.
+# ---------------------------------------------------------------------------
+review:
+  max_comments: 10
+  require_evidence: true          # quote the offending line, or drop the finding
+  allow_no_findings: true         # "nothing to flag" is a valid review
+  blocker_requires_fix: true      # blockers must carry a concrete fix suggestion
+  suppress:
+    - >-
+      Style, formatting, naming taste, or import ordering — a linter or
+      formatter owns those, not a reviewer.
+    - >-
+      Theoretical risks that need preconditions the surrounding code makes
+      unlikely or impossible.
+    - >-
+      Defense-in-depth suggestions where the primary defense is already present
+      and adequate.
+    - >-
+      Restating what the code does, summarizing the diff, or praising it.
+    - >-
+      Speculative performance concerns with no measurement and no concrete
+      input size.
+    - >-
+      Requests for tests, docs, or error handling on code paths this diff does
+      not change.
+    - >-
+      Anything you cannot point at a specific changed line for.
+
+# ---------------------------------------------------------------------------
 # GitHub logins treated as AI reviewers by the merge gate.
 # "[bot]" suffixes are stripped and case is ignored before matching.
 # "github-actions" covers claude-code-action runs that post with GITHUB_TOKEN.
@@ -108,10 +193,6 @@ rules:
       Review the diff against the PR description. If the code does something
       the description does not mention (scope creep, drive-by changes), point
       it out as [warn].
-    - >-
-      Prefer few high-signal comments over many shallow ones. Do not restate
-      what the code does; only comment where something should change or a
-      genuine question exists.
     - >-
       When you suspect an N+1 query or unbounded loop over external data,
       ask for query logs or measurements rather than asserting.

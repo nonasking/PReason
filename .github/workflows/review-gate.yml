@@ -77,6 +77,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          # Used to verify blocking findings before they hold the merge. When
+          # absent, findings block unverified rather than passing unchecked.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Assign human reviewer
         run: node scripts/assign-reviewer.mjs

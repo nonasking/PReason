@@ -17,10 +17,12 @@ import {
   globToRegExp,
   matchesAny,
   findingFingerprint,
+  renderConventionsMarkdown,
   MARKER_START,
   MARKER_END,
   spliceMarkedBlock,
 } from "./lib/conventions.mjs";
+import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
 
 const base = loadConventions();
 const clone = (patch = {}) => {
@@ -186,6 +188,95 @@ test("reviewer counts must be non-negative integers", () => {
     assert.throws(() => validateConventions(clone({ reviewers: patch })), /reviewers\./);
   }
   assert.doesNotThrow(() => validateConventions(clone({ reviewers: { count: 0 } })));
+});
+
+// --- review discipline rendering ------------------------------------------
+
+test("review discipline reaches the generated instructions", () => {
+  const md = renderConventionsMarkdown(base);
+  assert.match(md, /### How much to say/);
+  assert.match(md, /### Do not flag/);
+  assert.match(md, new RegExp(`at most ${base.review.max_comments} comments`));
+  assert.match(md, /Finding nothing is a correct/, "an empty review is permitted");
+  assert.match(md, /quote the offending code/, "evidence requirement");
+  assert.match(md, /\[blocker\] comment must include a concrete fix/);
+  for (const rule of base.review.suppress) {
+    assert.ok(md.includes(rule.replace(/\s+/g, " ").trim()), "each suppression rule is rendered");
+  }
+});
+
+test("discipline sections disappear when switched off", () => {
+  const quiet = clone({
+    review: {
+      max_comments: 0,
+      require_evidence: false,
+      allow_no_findings: false,
+      blocker_requires_fix: false,
+      suppress: [],
+    },
+  });
+  const md = renderConventionsMarkdown(quiet);
+  assert.doesNotMatch(md, /### How much to say/);
+  assert.doesNotMatch(md, /### Do not flag/);
+  assert.match(md, /### All files/, "the rules themselves still render");
+});
+
+// --- verification ---------------------------------------------------------
+
+const BLOCKER = { path: "src/a.js", body: "[blocker] boom", excerpt: "boom" };
+
+test("verification is skipped when disabled, and skipped findings still block", async () => {
+  const off = clone({ verification: { enabled: false } });
+  const out = await verifyBlockers([BLOCKER], {
+    conventions: off,
+    patchesByPath: new Map(),
+    apiKey: "unused",
+  });
+  assert.equal(out[0].verdict.status, "skipped");
+  assert.ok(blocksMerge(out[0]), "a skipped verdict must not unblock");
+});
+
+test("a missing API key leaves findings blocking rather than passing them", async () => {
+  const on = clone({ verification: { enabled: true } });
+  const out = await verifyBlockers([BLOCKER], {
+    conventions: on,
+    patchesByPath: new Map(),
+    apiKey: "",
+  });
+  assert.equal(out[0].verdict.status, "unverified");
+  assert.ok(blocksMerge(out[0]), "verification failure must never unblock a merge");
+});
+
+test("only an explicit refutation clears a finding", () => {
+  assert.ok(!blocksMerge({ verdict: { status: "refuted" } }));
+  for (const status of ["confirmed", "unverified", "skipped", "anything-else"]) {
+    assert.ok(blocksMerge({ verdict: { status } }), `${status} still blocks`);
+  }
+});
+
+test("verification config is validated", () => {
+  for (const patch of [{ votes: 0 }, { votes: 2.5 }, { enabled: "yes" }, { model: "" }]) {
+    assert.throws(() => validateConventions(clone({ verification: patch })), /verification\./);
+  }
+});
+
+// --- size gate ------------------------------------------------------------
+
+test("size exclusions keep generated files out of the count", () => {
+  const excluded = ["package-lock.json", "web/pnpm.lock", "src/__snapshots__/a.snap"];
+  for (const f of ["package-lock.json", "web/pnpm.lock"]) {
+    assert.ok(matchesAny(f, base.size.exclude), `${f} is excluded`);
+  }
+  assert.ok(matchesAny("src/generated/api.ts", base.size.exclude));
+  assert.ok(!matchesAny("src/payments/charge.js", base.size.exclude), "real code counts");
+  assert.equal(excluded.length, 3);
+});
+
+test("size config is validated", () => {
+  for (const patch of [{ action: "explode" }, { max_changed_lines: -1 }, { label: "" }]) {
+    assert.throws(() => validateConventions(clone({ size: patch })), /size\./);
+  }
+  assert.doesNotThrow(() => validateConventions(clone({ size: { max_changed_lines: 0 } })));
 });
 
 // --- generated-block splicing ---------------------------------------------

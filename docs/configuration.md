@@ -81,6 +81,92 @@ findings (path + normalized prose, ignoring line numbers, severity tags, and
 code blocks) and does not block on a re-post that matches one. Re-posts are
 counted in the gate summary so the noise stays visible.
 
+## `verification` — a second opinion before anything blocks
+
+```yaml
+verification:
+  enabled: true
+  model: claude-opus-5
+  votes: 1
+```
+
+A blocking tag is the reviewing model's own severity judgement, and models rate
+findings more severe than humans do. When enabled, every blocking finding gets
+an independent call that is asked to **refute** it, with the changed lines as
+its only context; only survivors hold the merge. Refuted findings are still
+listed in the gate summary (collapsed), so nothing disappears silently.
+
+Requires the `ANTHROPIC_API_KEY` secret. Cost scales with the number of
+*blocking* findings, not PRs — on a healthy repo that is a handful a week.
+
+**It fails safe in every direction.** A missing key, an API error, a safety
+refusal, or malformed output all leave the finding blocking, and the summary
+marks it `not verified`. A broken verifier makes the gate noisier, never more
+permissive.
+
+`votes` runs that many independent attempts and refutes only on a majority of
+the ones that succeeded. More votes measurably improves accuracy and costs
+linearly more; 3 is a reasonable step up for a repo where a wrong block is
+expensive.
+
+Set `enabled: false` to gate on the first pass alone.
+
+## `size` — mechanical PR size limit
+
+```yaml
+size:
+  max_changed_lines: 800
+  max_changed_files: 0     # 0 disables this check
+  action: warn             # warn | block
+  label: oversized-pr
+  exclude: ["**/*.lock", "**/generated/**"]
+```
+
+Review effectiveness runs 80–90% under ~200 changed lines and falls below 50%
+past ~1,000 — and large diffs degrade AI review too, since the reviewer's budget
+is spent before it reaches the risky part. Teams that report a working AI-review
+process enforce a limit mechanically.
+
+`action: warn` (the default) labels the PR and notes it in the summary, so
+adopting this template never blocks an in-flight PR by surprise. **`block` is
+what the evidence actually supports** — switch to it once your team has agreed
+on a threshold. Blocking also short-circuits verification spend on a PR that has
+to be split anyway.
+
+`exclude` keeps lockfiles, snapshots, and generated code out of the count.
+
+## `review` — how much the reviewer should say
+
+```yaml
+review:
+  max_comments: 10
+  require_evidence: true
+  allow_no_findings: true
+  blocker_requires_fix: true
+  suppress:
+    - Style, formatting, naming taste, or import ordering — a linter owns those.
+    - Theoretical risks that need preconditions the surrounding code makes unlikely.
+```
+
+These are compiled into every AI reviewer's instructions as two sections, *How
+much to say* and *Do not flag*.
+
+Comment volume is the most-cited reason teams abandon AI review: past some
+threshold people start resolving without reading, and then the tool's *correct*
+findings get ignored too. Hosted tools commonly land at 10–30 comments per PR; a
+well-tuned reviewer runs at 1–2 findings per review.
+
+| Option | Why it's there |
+|---|---|
+| `max_comments` | A stated budget. The gate reports when open comments exceed it — a signal that `suppress` needs tightening. |
+| `suppress` | Negative prompting. Naming what *not* to flag works far better than asking for "high-signal comments". |
+| `allow_no_findings` | Asked to find problems, a model will invent them. This makes an empty review an explicitly correct answer. |
+| `require_evidence` | "Quote the offending line or drop the finding" — cheap, and it kills findings about code the diff never touched. |
+| `blocker_requires_fix` | Attaching a concrete fix is the strongest known predictor of a review comment being acted on; explanation without a fix makes action *less* likely. |
+
+Set any flag to `false`, or `max_comments: 0` / `suppress: []`, to drop that
+section from the generated instructions.
+
 ## `ai_reviewers` — who counts as an AI
 
 GitHub logins whose review threads the gate manages. `[bot]` suffixes are

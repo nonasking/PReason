@@ -25,6 +25,22 @@ export function loadConventions(root = repoRoot()) {
   doc.gate.require_ai_review ??= true;
   doc.gate.recheck_label ??= "recheck-gate";
   doc.gate.fork_policy ??= "skip";
+  doc.verification ??= {};
+  doc.verification.enabled ??= false;
+  doc.verification.model ??= "claude-opus-5";
+  doc.verification.votes ??= 1;
+  doc.size ??= {};
+  doc.size.max_changed_lines ??= 0;
+  doc.size.max_changed_files ??= 0;
+  doc.size.action ??= "warn";
+  doc.size.label ??= "oversized-pr";
+  doc.size.exclude ??= [];
+  doc.review ??= {};
+  doc.review.max_comments ??= 0;
+  doc.review.require_evidence ??= false;
+  doc.review.allow_no_findings ??= true;
+  doc.review.blocker_requires_fix ??= false;
+  doc.review.suppress ??= [];
   doc.ai_reviewers ??= [];
   doc.reviewers ??= {};
   doc.reviewers.pool ??= [];
@@ -83,6 +99,35 @@ export function validateConventions(doc, file = "review-conventions.yml") {
   if (!["skip", "block"].includes(doc.gate.fork_policy)) {
     errors.push('gate.fork_policy must be "skip" or "block"');
   }
+
+  if (typeof doc.verification.enabled !== "boolean") {
+    errors.push("verification.enabled must be true or false");
+  }
+  if (!isStr(doc.verification.model)) {
+    errors.push("verification.model must be a non-empty model id");
+  }
+  if (!Number.isInteger(doc.verification.votes) || doc.verification.votes < 1) {
+    errors.push("verification.votes must be an integer ≥ 1");
+  }
+
+  for (const key of ["max_changed_lines", "max_changed_files"]) {
+    if (!Number.isInteger(doc.size[key]) || doc.size[key] < 0) {
+      errors.push(`size.${key} must be an integer ≥ 0 (0 disables the check)`);
+    }
+  }
+  if (!["warn", "block"].includes(doc.size.action)) {
+    errors.push('size.action must be "warn" or "block"');
+  }
+  if (!isStr(doc.size.label)) errors.push("size.label must be a non-empty string");
+  strArray(doc.size.exclude, "size.exclude");
+
+  if (!Number.isInteger(doc.review.max_comments) || doc.review.max_comments < 0) {
+    errors.push("review.max_comments must be an integer ≥ 0 (0 means no stated budget)");
+  }
+  for (const key of ["require_evidence", "allow_no_findings", "blocker_requires_fix"]) {
+    if (typeof doc.review[key] !== "boolean") errors.push(`review.${key} must be true or false`);
+  }
+  strArray(doc.review.suppress, "review.suppress");
 
   strArray(doc.ai_reviewers, "ai_reviewers");
   strArray(doc.reviewers.pool, "reviewers.pool");
@@ -215,6 +260,7 @@ function renderRules(rules) {
 }
 
 export function renderConventionsMarkdown(conventions) {
+  const { review } = conventions;
   const lines = [];
   lines.push("## Code review conventions");
   lines.push("");
@@ -225,6 +271,50 @@ export function renderConventionsMarkdown(conventions) {
       `Unresolved ${conventions.severity.block_on.map((t) => `\`[${t}]\``).join("/")} ` +
       `comments block the merge gate.`
   );
+
+  const discipline = [];
+  if (review.max_comments > 0) {
+    discipline.push(
+      `Leave at most ${review.max_comments} comments on a pull request. If more than ` +
+        `that seem warranted, report only the ${review.max_comments} most consequential. ` +
+        `A reviewer that comments on everything gets ignored on everything.`
+    );
+  }
+  if (review.allow_no_findings) {
+    discipline.push(
+      "Finding nothing is a correct and expected outcome. Do not manufacture a " +
+        "finding to demonstrate that you reviewed the code; say you found nothing."
+    );
+  }
+  if (review.require_evidence) {
+    discipline.push(
+      "Every comment must point at a specific line that this diff changed, and quote " +
+        "the offending code. If you cannot quote the line, drop the finding."
+    );
+  }
+  if (review.blocker_requires_fix) {
+    const blockTags = conventions.severity.block_on.map((t) => `[${t}]`).join("/");
+    discipline.push(
+      `A ${blockTags} comment must include a concrete fix — a code suggestion where one ` +
+        `applies. A finding that only describes a problem is far less likely to be acted ` +
+        `on; if you cannot propose a fix, say what you would need to know to propose one.`
+    );
+  }
+
+  if (discipline.length) {
+    lines.push("");
+    lines.push("### How much to say");
+    lines.push("");
+    lines.push(renderRules(discipline));
+  }
+
+  if (review.suppress.length) {
+    lines.push("");
+    lines.push("### Do not flag");
+    lines.push("");
+    lines.push(renderRules(review.suppress));
+  }
+
   lines.push("");
   lines.push("### All files");
   lines.push("");
