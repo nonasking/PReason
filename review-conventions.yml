@@ -25,6 +25,26 @@ severity:
   block_on: [blocker]
 
 # ---------------------------------------------------------------------------
+# Merge-gate behavior.
+#
+# require_ai_review: fail the gate when NO configured AI reviewer has posted
+#   anything on the PR. Without this the gate is fail-open: a reviewer that
+#   dies silently (claude-code-action can exit 0 having posted nothing) is
+#   indistinguishable from "no blockers found", and unreviewed code merges.
+# recheck_label: GitHub does not expose thread resolution as an Actions
+#   trigger, so resolving a thread cannot re-run the gate on its own. Replying
+#   in a thread does re-run it; add/remove this label to force a re-run after a
+#   bare resolve. See docs/configuration.md → Re-triggering the gate.
+# fork_policy: fork PRs get a read-only token and no secrets, so AI review
+#   cannot run there. "skip" passes the gate with an explanatory note and the
+#   risk label (fork PRs then rely on human review); "block" fails instead.
+# ---------------------------------------------------------------------------
+gate:
+  require_ai_review: true
+  recheck_label: recheck-gate
+  fork_policy: skip   # skip | block
+
+# ---------------------------------------------------------------------------
 # GitHub logins treated as AI reviewers by the merge gate.
 # "[bot]" suffixes are stripped and case is ignored before matching.
 # "github-actions" covers claude-code-action runs that post with GITHUB_TOKEN.

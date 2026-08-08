@@ -21,6 +21,10 @@ export function loadConventions(root = repoRoot()) {
   doc.severity.tags ??= ["blocker", "warn", "nit"];
   doc.severity.default ??= "warn";
   doc.severity.block_on ??= ["blocker"];
+  doc.gate ??= {};
+  doc.gate.require_ai_review ??= true;
+  doc.gate.recheck_label ??= "recheck-gate";
+  doc.gate.fork_policy ??= "skip";
   doc.ai_reviewers ??= [];
   doc.reviewers ??= {};
   doc.reviewers.pool ??= [];
@@ -68,6 +72,16 @@ export function validateConventions(doc, file = "review-conventions.yml") {
         }
       }
     }
+  }
+
+  if (typeof doc.gate.require_ai_review !== "boolean") {
+    errors.push("gate.require_ai_review must be true or false");
+  }
+  if (!isStr(doc.gate.recheck_label)) {
+    errors.push("gate.recheck_label must be a non-empty string");
+  }
+  if (!["skip", "block"].includes(doc.gate.fork_policy)) {
+    errors.push('gate.fork_policy must be "skip" or "block"');
   }
 
   strArray(doc.ai_reviewers, "ai_reviewers");
@@ -136,6 +150,28 @@ export function parseSeverity(body, conventions) {
 
 export function isBlocking(severity, conventions) {
   return conventions.severity.block_on.map((s) => s.toLowerCase()).includes(severity);
+}
+
+// --- finding fingerprints -------------------------------------------------
+
+// AI reviewers re-post findings the author already declined: every re-run on a
+// new push re-raises the same comment as a fresh, unresolved thread. Without
+// this, a rebutted [blocker] resurrects and re-blocks the merge on every push.
+// The fingerprint deliberately excludes the line number (it shifts on rebase)
+// and the severity tag, and keeps only a normalized prefix of the prose — an
+// exact or near-exact re-post collides, a genuinely reworded finding does not.
+export function findingFingerprint(path, body, conventions) {
+  const tags = conventions.severity.tags.join("|");
+  const normalized = String(body || "")
+    .replace(new RegExp(`^\\s*(?:\\*\\*)?\\[?(?:${tags})\\]?(?:\\*\\*)?\\s*[:\\-\\]]?`, "i"), "")
+    .replace(/```[\s\S]*?```/g, " ")      // drop suggestion blocks
+    .replace(/`[^`]*`/g, " ")             // drop inline code
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")    // drop punctuation
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .slice(0, 200);
+  return `${path || ""}::${normalized}`;
 }
 
 // --- glob matching (supports **, *, ?) ------------------------------------

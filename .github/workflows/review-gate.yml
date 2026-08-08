@@ -3,24 +3,46 @@
 #   AI reviews land  →  gate blocks while a [blocker] thread is unresolved
 #                    →  author fixes or rebuts, resolves the thread
 #                    →  gate passes  →  one human reviewer is auto-assigned
-#                       (risk paths escalate to the risk label / risk reviewers)
+#                       (risk paths escalate to the risk label / risk reviewer)
 #
 # Make "gate" a required status check in branch protection to enforce it.
+#
+# ── Why these triggers ──────────────────────────────────────────────────────
+# `pull_request_review_thread` (resolved/unresolved) exists as a *webhook* but
+# has never been added as an Actions trigger — the request has been open since
+# March 2022. So resolving a thread cannot re-run this workflow on its own.
+#
+# What is covered instead:
+#   pull_request_review_comment  → the author replies in a thread (the flow we
+#                                  actually want: rebuttals are visible)
+#   issue_comment                → the author comments on the PR
+#   pull_request_review          → an AI reviewer submits its batch
+#   labeled / unlabeled          → manual re-run after a bare resolve
+#   synchronize                  → a pushed fix
+#
+# For an exact re-run on thread resolution you need an external receiver
+# subscribed to the pull_request_review_thread webhook that calls
+# repository_dispatch back into this repo. See docs/configuration.md.
 
 name: Review gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  # Re-runs when an AI comment thread is resolved or unresolved.
-  pull_request_review_thread:
-    types: [resolved, unresolved]
-  # Re-runs when an AI reviewer submits its review batch.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   pull_request_review:
-    types: [submitted]
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+  repository_dispatch:
+    types: [review-thread-changed]
 
 concurrency:
-  group: review-gate-${{ github.event.pull_request.number }}
+  group: >-
+    review-gate-${{ github.event.pull_request.number
+      || github.event.issue.number
+      || github.event.client_payload.pr_number }}
   cancel-in-progress: true
 
 permissions:
@@ -30,21 +52,34 @@ permissions:
 
 jobs:
   gate:
-    if: ${{ !github.event.pull_request.draft }}
+    # issue_comment fires for issues too — only act on pull requests.
+    if: >-
+      github.event_name != 'issue_comment'
+      || github.event.issue.pull_request != null
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm ci
+
+      - name: Resolve PR number
+        id: pr
+        run: |
+          echo "number=${{ github.event.pull_request.number
+            || github.event.issue.number
+            || github.event.client_payload.pr_number }}" >> "$GITHUB_OUTPUT"
+
       - name: Check unresolved blocking AI comments
         run: node scripts/review-gate.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+
       - name: Assign human reviewer
         run: node scripts/assign-reviewer.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}

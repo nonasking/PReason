@@ -116,6 +116,28 @@ re-run. Outdated threads (code changed underneath) don't block.
 | `.github/workflows/conventions-drift.yml` | Fails if generated configs don't match the YAML source |
 | `CLAUDE.md`, `.github/copilot-instructions.md`, `.github/instructions/*`, `.coderabbit.yaml` | **Generated** — never edit by hand |
 
+## Platform constraints this works around
+
+These are GitHub and tooling realities that a naive version of this pipeline
+gets wrong. Each is handled in code; see [docs/configuration.md](docs/configuration.md).
+
+- **Thread resolution is not an Actions trigger.** `pull_request_review_thread`
+  exists only as a webhook (open request since 2022). The gate re-runs on
+  replies, comments, pushes, and a label toggle instead — and accepts a
+  `repository_dispatch` if you run a webhook receiver.
+- **A silent reviewer looks like a clean review.** `claude-code-action` can exit
+  0 having posted nothing. `gate.require_ai_review` fails closed instead.
+- **Fork PRs cannot run AI review** (read-only token, no secrets, and
+  `pull_request_target` is closed off since `actions/checkout` v7). They pass the
+  gate with a note and route to human review.
+- **AI reviewers re-post findings you declined** on every re-run. The gate
+  fingerprints resolved findings so a rebutted blocker stays rebutted.
+- **Reviews are biased by prior comments, including the reviewer's own** — so
+  the Claude workflow excludes bot comments from its context.
+- **Copilot ignores comment-format instructions** by GitHub's own documentation,
+  and its native High/Medium/Low severity is not exposed via any API. Treat
+  Copilot as advisory; it is not a reliable participant in a parsed gate.
+
 ## Design notes & limitations
 
 - **Untagged comments degrade gracefully.** Copilot's instruction files are

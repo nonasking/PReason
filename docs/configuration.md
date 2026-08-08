@@ -28,6 +28,59 @@ severity:
   useful if your AI reviewers reliably tag and you want to catch the ones that
   slip.
 
+## `gate` — merge-gate behavior
+
+```yaml
+gate:
+  require_ai_review: true      # fail when no AI reviewer posted anything
+  recheck_label: recheck-gate  # toggle this label to force a re-run
+  fork_policy: skip            # skip | block
+```
+
+**`require_ai_review` closes a fail-open hole.** `claude-code-action` can exit
+successfully having posted nothing at all (its comment MCP server failing to
+initialize is a known failure mode), and a depleted Copilot credit pool stops
+reviews org-wide. In both cases "no blockers found" and "the reviewer died" look
+identical. With this on, the gate fails when no configured AI reviewer left any
+trace on the PR. Set it to `false` only if the repo intentionally runs no AI
+reviewer.
+
+**`fork_policy`.** Fork PRs receive a read-only `GITHUB_TOKEN` and no secrets,
+so AI review cannot run on them — and `pull_request_target` is no longer an
+escape hatch (`actions/checkout` v7 blocks fork-ref checkout). `skip` passes the
+gate with an explanatory note and applies `reviewers.risk_label`, so fork
+contributions route to full human review instead of becoming unmergeable behind
+a required check. `block` fails them instead.
+
+### Re-triggering the gate
+
+GitHub exposes thread resolution as a webhook (`pull_request_review_thread`) but
+**not as an Actions trigger** — the request has been open since March 2022. So
+resolving a thread cannot re-run the gate by itself. What does re-run it:
+
+| Action | Re-runs the gate |
+|---|---|
+| Replying in a review thread | ✅ automatically |
+| Commenting on the PR | ✅ automatically |
+| Pushing a fix | ✅ automatically |
+| An AI reviewer submitting a review | ✅ automatically |
+| Adding/removing `gate.recheck_label` | ✅ manual escape hatch |
+| Resolving a thread with no reply | ❌ |
+
+This lines the incentive up with the intent: a rebuttal you actually write is
+what clears the gate. For an exact re-run on resolution, run a receiver
+subscribed to the `pull_request_review_thread` webhook that fires
+`repository_dispatch` with type `review-thread-changed` and
+`client_payload.pr_number` — the workflow already accepts it.
+
+### Dismissed findings do not resurrect
+
+AI reviewers re-post findings the author already declined: each re-run creates a
+brand-new thread for the same comment. The gate fingerprints resolved AI
+findings (path + normalized prose, ignoring line numbers, severity tags, and
+code blocks) and does not block on a re-post that matches one. Re-posts are
+counted in the gate summary so the noise stays visible.
+
 ## `ai_reviewers` — who counts as an AI
 
 GitHub logins whose review threads the gate manages. `[bot]` suffixes are
