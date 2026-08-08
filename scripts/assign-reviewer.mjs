@@ -47,6 +47,20 @@ async function gh(pathname, options = {}) {
 const pr = await gh(`/pulls/${prNumber}`);
 const author = normalizeLogin(pr.user.login);
 
+// Fork PRs hand this workflow a read-only token, so every write below (label,
+// review request) would 403 and fail the job — turning a required gate into a
+// permanent block on outside contributions. The gate already labels and
+// explains fork PRs; assignment simply does not apply.
+if (pr.head?.repo?.full_name !== `${owner}/${repo}`) {
+  console.log("Fork PR — token is read-only, skipping reviewer assignment.");
+  process.exit(0);
+}
+
+if (pr.draft) {
+  console.log("Draft PR — skipping reviewer assignment.");
+  process.exit(0);
+}
+
 // --- idempotency: bail if a human is already on the PR --------------------
 
 const requested = (pr.requested_reviewers || []).map((u) => u.login);

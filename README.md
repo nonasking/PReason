@@ -161,9 +161,12 @@ gets wrong. Each is handled in code; see [docs/configuration.md](docs/configurat
   high-volume/low-risk repos. Your Anthropic console shows per-run token usage,
   so the template doubles as a cost-measurement rig before a team-wide rollout.
 
-## 한국어
+## Documentation
 
-[docs/README.ko.md](docs/README.ko.md)
+- [docs/design.md](docs/design.md) — how the pipeline works, why it's shaped
+  this way, and what isn't built yet
+- [docs/configuration.md](docs/configuration.md) — every configuration option
+- [docs/README.ko.md](docs/README.ko.md) — 한국어 소개
 
 ## License
 
