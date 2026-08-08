@@ -87,7 +87,8 @@ review-conventions.yml ──[sync]──▶ CLAUDE.md (marked block)
 | `scripts/assign-reviewer.mjs` | Risk labeling and human reviewer assignment. |
 | `.github/workflows/claude-review.yml` | Claude first-pass review. |
 | `.github/workflows/review-gate.yml` | Gate, then assignment. |
-| `.github/workflows/conventions-drift.yml` | Fails if generated configs don't match the source. |
+| `scripts/conventions.test.mjs` | Unit tests for the pure logic above (`npm test`). |
+| `.github/workflows/ci.yml` | Runs the unit tests and the drift check. |
 
 Runtime dependency: Node 20 and `js-yaml`. Nothing else.
 

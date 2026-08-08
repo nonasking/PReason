@@ -1,0 +1,33 @@
+# Repository CI for the pipeline itself.
+#
+#   1. Unit tests for the logic the gate and assigner depend on — severity
+#      parsing, glob matching, finding fingerprints, config validation.
+#   2. Convention-as-code enforcement: the generated tool configs (CLAUDE.md
+#      block, copilot-instructions.md block, .github/instructions/*,
+#      .coderabbit.yaml) must match review-conventions.yml. Editing a generated
+#      file without updating the source — or vice versa — fails here.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Generated configs are in sync
+        run: node scripts/sync-conventions.mjs --check

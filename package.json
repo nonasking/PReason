@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "sync": "node scripts/sync-conventions.mjs",
-    "check": "node scripts/sync-conventions.mjs --check"
+    "test": "node --test scripts/*.test.mjs",
+    "check": "npm test && node scripts/sync-conventions.mjs --check"
   },
   "license": "Apache-2.0",
   "dependencies": {

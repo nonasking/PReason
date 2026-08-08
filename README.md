@@ -113,7 +113,8 @@ re-run. Outdated threads (code changed underneath) don't block.
 | `scripts/assign-reviewer.mjs` | Risk labeling + deterministic single-reviewer assignment after the gate passes |
 | `.github/workflows/claude-review.yml` | Claude first-pass review via `anthropics/claude-code-action` |
 | `.github/workflows/review-gate.yml` | Runs gate then assignment on PR / review / thread-resolution events |
-| `.github/workflows/conventions-drift.yml` | Fails if generated configs don't match the YAML source |
+| `scripts/conventions.test.mjs` | Unit tests for severity parsing, glob matching, fingerprints, and config validation (`npm test`) |
+| `.github/workflows/ci.yml` | Runs the unit tests and fails if generated configs don't match the YAML source |
 | `CLAUDE.md`, `.github/copilot-instructions.md`, `.github/instructions/*`, `.coderabbit.yaml` | **Generated** — never edit by hand |
 
 ## Platform constraints this works around
