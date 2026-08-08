@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 
-export const MARKER_START = "<!-- review-gate:conventions:start -->";
-export const MARKER_END = "<!-- review-gate:conventions:end -->";
+export const MARKER_START = "<!-- preason:conventions:start -->";
+export const MARKER_END = "<!-- preason:conventions:end -->";
 export const GENERATED_NOTICE =
   "Generated from review-conventions.yml by scripts/sync-conventions.mjs — do not edit by hand.";
 

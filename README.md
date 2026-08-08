@@ -1,8 +1,11 @@
-# review-gate
+# PReason
 
 **A convention-as-code review pipeline: define your team's review rules once,
 have every AI reviewer follow them, and cut human review down to one person
 spending five minutes per PR.**
+
+*PR + reason* — every AI finding must be resolved or reasoned away before a
+human is asked to look, and the human's job is to review that reasoning.
 
 AI-assisted development multiplies PR volume until nobody can genuinely review
 everything — so teams quietly fall back to rubber-stamp approvals. This repo is
@@ -44,6 +47,7 @@ gate makes the single human reviewer's five minutes actually sufficient.
 
 1. **Use this repo as a template** (or copy `review-conventions.yml`,
    `scripts/`, `.github/workflows/`, and `package.json` into an existing repo).
+   PReason has no runtime of its own — it is these files plus one dependency.
 
 2. **Edit `review-conventions.yml`** — your rules, your risk paths, your
    reviewer pool:

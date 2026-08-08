@@ -1,5 +1,5 @@
 {
-  "name": "review-gate",
+  "name": "preason",
   "version": "0.1.0",
   "private": true,
   "description": "Convention-as-code review pipeline: one source of review rules synced to every AI reviewer, an AI-comment merge gate, and single-human-reviewer assignment.",

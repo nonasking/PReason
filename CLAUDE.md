@@ -7,7 +7,7 @@ it — edit the YAML and run `npm run sync`, never the generated block.
 When reviewing pull requests in this repository (or any repository that adopts
 this template), follow the conventions in the generated section exactly.
 
-<!-- review-gate:conventions:start -->
+<!-- preason:conventions:start -->
 <!-- Generated from review-conventions.yml by scripts/sync-conventions.mjs — do not edit by hand. -->
 
 ## Code review conventions
@@ -41,4 +41,4 @@ Severity contract: every review comment starts with one of `[blocker]`, `[warn]`
 - [blocker] tokens, passwords, or secrets logged, stored in plain text, or returned in API responses.
 - Check authorization, not just authentication: does every new endpoint verify the caller may act on the target resource?
 
-<!-- review-gate:conventions:end -->
+<!-- preason:conventions:end -->
