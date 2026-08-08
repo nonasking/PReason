@@ -113,9 +113,12 @@ first token of its first comment:
 | `[nit]` | nit | reported, does not block |
 | *(none)* | `severity.default` (warn) | tools don't always comply — untagged comments fall back safely |
 
-Resolving a thread (fix or rebuttal) re-triggers the workflow via the
-`pull_request_review_thread` event, so the check flips green without a manual
-re-run. Outdated threads (code changed underneath) don't block.
+Replying in a thread, commenting, pushing, or the review workflow finishing all
+re-run the gate automatically — so the reply-then-resolve flow flips the check
+green on its own. A bare resolve with no reply does not (GitHub exposes no
+Actions trigger for it); toggle the `recheck-gate` label for that. Outdated
+threads (code changed underneath) don't block, and blocking findings are
+adversarially verified before they hold the merge.
 
 ## What each file does
 
@@ -129,7 +132,7 @@ re-run. Outdated threads (code changed underneath) don't block.
 | `.github/workflows/review-gate.yml` | Runs gate then assignment on PR / review / thread-resolution events |
 | `scripts/conventions.test.mjs` | Unit tests for severity parsing, glob matching, fingerprints, and config validation (`npm test`) |
 | `.github/workflows/ci.yml` | Runs the unit tests and fails if generated configs don't match the YAML source |
-| `CLAUDE.md`, `.github/copilot-instructions.md`, `.github/instructions/*`, `.coderabbit.yaml` | **Generated** — never edit by hand |
+| `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/*`, `.coderabbit.yaml` | **Generated** (see `sync.targets`) — never edit by hand |
 
 ## Platform constraints this works around
 
