@@ -16,6 +16,7 @@
 // Env: GITHUB_TOKEN, GITHUB_REPOSITORY (owner/repo), PR_NUMBER
 
 import { loadConventions, matchesAny, normalizeLogin, isAiReviewer } from "./lib/conventions.mjs";
+import { rankCandidates } from "./lib/rank.mjs";
 
 const token = process.env.GITHUB_TOKEN;
 const [owner, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
@@ -151,14 +152,16 @@ function rotate(pool, n) {
   return Array.from({ length: n }, (_, i) => pool[(start + i) % pool.length]);
 }
 
-// Rank by who has actually touched these files, then balance load *within*
-// that set. Balancing across the whole pool backfires: an author who gets an
-// unqualified suggestion just picks someone else, and the balancing is lost.
+// Rank by the configured criteria (reviewers.criteria). Default: people who
+// have actually touched these files, least-loaded first. Balancing across the
+// whole pool backfires: an author who gets an unqualified suggestion just
+// picks someone else, and the balancing is lost — so expertise gates first.
 async function byExpertise(pool, n) {
+  const crit = conventions.reviewers.criteria;
   const [expertise, load, busy] = await Promise.all([
-    commitCounts(pool),
-    openReviewLoad(pool),
-    conventions.reviewers.skip_unavailable ? limitedAvailability(pool) : new Set(),
+    crit.rank.includes("expertise") ? commitCounts(pool, crit) : new Map(),
+    crit.rank.includes("load") ? openReviewLoad(pool) : new Map(),
+    crit.availability ? limitedAvailability(pool) : new Set(),
   ]);
 
   // Availability is a filter, not a ranking — but never let it empty the pool.
@@ -170,20 +173,16 @@ async function byExpertise(pool, n) {
 
   // Experts first; fall back to the whole candidate list when nobody in the
   // pool has history on these files (new area, new team member).
-  const experts = candidates.filter((l) => (expertise.get(normalizeLogin(l)) || 0) > 0);
-  const ranked = experts.length ? experts : candidates;
-  if (!experts.length) {
-    console.log("No pool member has recent commits to the changed files — ranking by load only.");
+  let ranked = candidates;
+  if (crit.rank.includes("expertise")) {
+    const experts = candidates.filter((l) => (expertise.get(normalizeLogin(l)) || 0) > 0);
+    ranked = experts.length ? experts : candidates;
+    if (!experts.length) {
+      console.log("No pool member has recent commits to the changed files — ranking by load only.");
+    }
   }
 
-  const sorted = [...ranked].sort((a, b) => {
-    const [an, bn] = [normalizeLogin(a), normalizeLogin(b)];
-    const byLoad = (load.get(an) || 0) - (load.get(bn) || 0);
-    if (byLoad !== 0) return byLoad;
-    const byExp = (expertise.get(bn) || 0) - (expertise.get(an) || 0);
-    if (byExp !== 0) return byExp;
-    return an.localeCompare(bn); // stable across re-runs
-  });
+  const sorted = rankCandidates(ranked, crit.rank, { expertise, load });
 
   for (const l of sorted.slice(0, n)) {
     console.log(
@@ -196,20 +195,18 @@ async function byExpertise(pool, n) {
 
 // Commits touching the changed files, by author. Sampled: the largest few
 // files carry most of the signal, and this is one API call each.
-async function commitCounts(pool) {
-  const MAX_FILES = 10;
-  const MAX_COMMITS = 30;
+async function commitCounts(pool, crit) {
   const inPool = new Set(pool.map(normalizeLogin));
   const counts = new Map();
 
   const sampled = [...files]
     .sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions))
-    .slice(0, MAX_FILES);
+    .slice(0, crit.expertise_files);
 
   const perFile = await Promise.all(
     sampled.map((f) =>
       gh(
-        `/commits?path=${encodeURIComponent(f.filename)}&per_page=${MAX_COMMITS}&sha=${
+        `/commits?path=${encodeURIComponent(f.filename)}&per_page=${crit.expertise_commits}&sha=${
           encodeURIComponent(pr.base.ref)
         }`
       ).catch(() => [])

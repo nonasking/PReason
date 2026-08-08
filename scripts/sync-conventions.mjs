@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  GENERATED_NOTICE,
   repoRoot,
   loadConventions,
   buildMarkedBlock,
@@ -19,31 +20,46 @@ const root = repoRoot();
 const checkOnly = process.argv.includes("--check");
 const conventions = loadConventions(root);
 const block = buildMarkedBlock(conventions);
+const enabled = new Set(conventions.sync.targets);
 
 /** @type {{file: string, content: string}[]} */
 const targets = [];
 
-// 1–2. CLAUDE.md and copilot-instructions.md: managed block inside a file the
-// user may also edit — only the region between the markers is generated.
-for (const rel of ["CLAUDE.md", ".github/copilot-instructions.md"]) {
+// Marked-block targets: a managed region inside a file the user may also edit —
+// only the region between the markers is generated. AGENTS.md is the
+// cross-tool convention file most non-Claude AI reviewers and agents read.
+const splicedTargets = [
+  ["claude", "CLAUDE.md"],
+  ["agents", "AGENTS.md"],
+  ["copilot", ".github/copilot-instructions.md"],
+];
+for (const [target, rel] of splicedTargets) {
+  if (!enabled.has(target)) continue;
   const abs = path.join(root, rel);
   const existing = fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : "";
   targets.push({ file: rel, content: spliceMarkedBlock(existing, block) });
 }
 
-// 3. Copilot path-scoped instruction files: fully generated, one per scope.
+// Copilot path-scoped instruction files: fully generated, one per scope.
 const instructionsDir = ".github/instructions";
 const expectedScoped = new Set();
-for (const scope of conventions.rules.scoped) {
-  const rel = path.join(instructionsDir, `${scope.name}.review.instructions.md`);
-  expectedScoped.add(rel);
-  targets.push({ file: rel, content: buildCopilotScopedFile(scope, conventions) });
+if (enabled.has("copilot")) {
+  for (const scope of conventions.rules.scoped) {
+    const rel = path.join(instructionsDir, `${scope.name}.review.instructions.md`);
+    expectedScoped.add(rel);
+    targets.push({ file: rel, content: buildCopilotScopedFile(scope, conventions) });
+  }
 }
 
-// 4. CodeRabbit config: fully generated.
-targets.push({ file: ".coderabbit.yaml", content: buildCodeRabbitConfig(conventions) });
+// CodeRabbit config: fully generated.
+if (enabled.has("coderabbit")) {
+  targets.push({ file: ".coderabbit.yaml", content: buildCodeRabbitConfig(conventions) });
+}
 
-// Stale scoped files (scope renamed/removed in the source) count as drift too.
+// Stale generated files count as drift too: scoped files whose scope was
+// renamed/removed (or whose target was disabled), and a fully-generated
+// .coderabbit.yaml left behind after its target was disabled. Marked-block
+// files of a disabled target are left alone — they may carry user content.
 const staleScoped = (fs.existsSync(path.join(root, instructionsDir))
   ? fs.readdirSync(path.join(root, instructionsDir))
   : []
@@ -51,6 +67,13 @@ const staleScoped = (fs.existsSync(path.join(root, instructionsDir))
   .filter((f) => f.endsWith(".review.instructions.md"))
   .map((f) => path.join(instructionsDir, f))
   .filter((rel) => !expectedScoped.has(rel));
+
+if (!enabled.has("coderabbit")) {
+  const abs = path.join(root, ".coderabbit.yaml");
+  if (fs.existsSync(abs) && fs.readFileSync(abs, "utf8").includes(GENERATED_NOTICE)) {
+    staleScoped.push(".coderabbit.yaml");
+  }
+}
 
 const drifted = [];
 for (const { file, content } of targets) {

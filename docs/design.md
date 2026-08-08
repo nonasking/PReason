@@ -67,7 +67,7 @@ and the accountability intact.
 ## 3. Components
 
 ```
-review-conventions.yml ──[sync]──▶ CLAUDE.md (marked block)
+review-conventions.yml ──[sync]──▶ CLAUDE.md, AGENTS.md (marked blocks)
    (single source)                 .github/copilot-instructions.md (marked block)
                                    .github/instructions/<scope>.review.instructions.md
                                    .coderabbit.yaml
@@ -96,13 +96,17 @@ the verifier). Nothing else.
 
 ### Generated files
 
-`CLAUDE.md` and `.github/copilot-instructions.md` are **partially** generated —
-only the region between `<!-- preason:conventions:start -->` and
+Which files are generated is itself configuration (`sync.targets` — see
+configuration.md). `CLAUDE.md`, `AGENTS.md`, and
+`.github/copilot-instructions.md` are **partially** generated — only the region
+between `<!-- preason:conventions:start -->` and
 `<!-- preason:conventions:end -->` is replaced, so hand-written content in those
-files survives. `.github/instructions/*.review.instructions.md` and
+files survives. `AGENTS.md` is the cross-tool file most non-Claude reviewers
+and agents read, which is what makes the pipeline reviewer-extensible without
+per-tool code. `.github/instructions/*.review.instructions.md` and
 `.coderabbit.yaml` are fully generated; scope files whose scope disappears from
-the YAML are deleted on the next sync. `sync --check` reports stale scope files
-as drift.
+the YAML — or whose target is removed — are deleted on the next sync.
+`sync --check` reports stale files as drift.
 
 ---
 

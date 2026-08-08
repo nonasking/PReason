@@ -10,6 +10,73 @@ npm run sync    # recompile tool configs from the YAML
 npm run check   # validate + verify generated files are in sync (what CI runs)
 ```
 
+## `sync` — which tool configs are generated
+
+```yaml
+sync:
+  targets: [claude, agents, copilot, coderabbit]
+```
+
+| Target | Generates | Read by |
+|---|---|---|
+| `claude` | `CLAUDE.md` (marked block) | claude-code-action, Claude Code |
+| `agents` | `AGENTS.md` (marked block) | most other AI tools — Codex, Cursor, Gemini CLI, Copilot (since 2026-07) |
+| `copilot` | `.github/copilot-instructions.md` + `.github/instructions/*` | GitHub Copilot code review |
+| `coderabbit` | `.coderabbit.yaml` | CodeRabbit |
+
+Remove targets you don't use. Fully-generated files of a removed target
+(`.coderabbit.yaml`, the instructions directory) are deleted on the next sync;
+marked-block files are left alone since they may carry your own content.
+
+`AGENTS.md` is how you reach reviewers PReason has no dedicated target for —
+see *Adding another AI reviewer* below.
+
+## Adding another AI reviewer
+
+The pipeline is reviewer-agnostic: the gate reads GitHub review threads and
+does not care what posted them. Any reviewer participates by meeting a
+three-part contract:
+
+1. **It reads the conventions.** Most tools read `AGENTS.md` (keep the `agents`
+   sync target). Tools with their own config format can get a dedicated sync
+   target — that is the only PReason code a new tool might need.
+2. **It posts inline review comments** under a stable bot login, and posts
+   *something* (a summary comment) when it finds nothing — otherwise the
+   fail-closed check cannot tell a clean review from a dead reviewer.
+3. **Its login is listed** in `ai_reviewers` — or in `advisory_reviewers` if it
+   cannot reliably emit the severity tag (that is Copilot's home, and the right
+   first home for any tool you're still evaluating).
+
+A workflow skeleton for a hypothetical reviewer:
+
+```yaml
+name: Acme review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+jobs:
+  review:
+    if: >-
+      !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: acme/review-action@v1        # must post inline comments
+        with:
+          api_key: ${{ secrets.ACME_API_KEY }}
+          instructions_file: AGENTS.md     # the synced conventions
+```
+
+To have the gate re-run when this workflow finishes, add its name to the
+`workflow_run.workflows` list in `.github/workflows/review-gate.yml`.
+
+One honest note: the evidence favors running **one** gated reviewer, not
+several — teams running many report the tools miss the same things while the
+noise multiplies. Add a second reviewer as `advisory_reviewers` first, and
+promote it only if its findings earn it.
+
 ## `severity` — the tag contract
 
 ```yaml
@@ -205,7 +272,11 @@ reviewers:
   risk_count: 2               # reviewers per risk-path PR (defaults to count)
   risk_label: needs-human-review
   strategy: expertise         # expertise | rotation
-  skip_unavailable: true      # skip reviewers whose GitHub status is "busy"
+  criteria:                   # tunes the expertise strategy; defaults shown
+    rank: [load, expertise]   # sort keys, in priority order
+    availability: true        # skip reviewers whose GitHub status is "busy"
+    expertise_files: 10       # sample the N largest changed files
+    expertise_commits: 30     # look back N commits per sampled file
 ```
 
 - **Adjust reviewer count** with `count`; `risk_count` lets risky diffs demand
@@ -220,18 +291,22 @@ reviewers:
 
 ### `strategy: expertise` (default)
 
-Ranks candidates by who has actually touched the files this PR changes, then
-picks the **least-loaded person within that group**:
+Ranks candidates by the criteria you configure. With the defaults: people who
+have actually touched the changed files, **least-loaded first within that
+group**:
 
-1. Drop anyone whose GitHub status is "busy" (`skip_unavailable`). If that would
-   empty the pool, the filter is dropped rather than leaving the PR unassigned —
-   availability-blind assignment is a documented way to make PRs stall silently.
-2. Count commits touching the changed files, from the ten largest files in the
-   diff, looking back 30 commits each. Pool members with at least one commit form
-   the expert set; if nobody qualifies (new area, new hire) the whole pool is
-   used and a note is logged.
-3. Sort the expert set by open review load (ascending), then expertise
-   (descending), then login — so re-runs pick the same person.
+1. Drop anyone whose GitHub status is "busy" (`criteria.availability`). If that
+   would empty the pool, the filter is dropped rather than leaving the PR
+   unassigned — availability-blind assignment is a documented way to make PRs
+   stall silently.
+2. Count commits touching the changed files, from the `expertise_files` largest
+   files in the diff, looking back `expertise_commits` commits each. Pool
+   members with at least one commit form the expert set; if nobody qualifies
+   (new area, new hire) the whole pool is used and a note is logged.
+3. Sort by `criteria.rank`, in order, then login — so re-runs pick the same
+   person. `rank: [load, expertise]` (default) prefers the idle expert;
+   `rank: [expertise, load]` prefers the deepest expert even when busy. A key
+   left out of `rank` is neither scored nor fetched.
 
 The chosen reviewers' commit counts and open review load are printed in the job
 log, so a surprising pick is explainable.

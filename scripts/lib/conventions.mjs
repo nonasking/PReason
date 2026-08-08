@@ -51,7 +51,13 @@ export function loadConventions(root = repoRoot()) {
   doc.reviewers.count ??= 1;
   doc.reviewers.risk_count ??= doc.reviewers.count;
   doc.reviewers.strategy ??= "expertise";
-  doc.reviewers.skip_unavailable ??= true;
+  doc.reviewers.criteria ??= {};
+  doc.reviewers.criteria.rank ??= ["load", "expertise"];
+  doc.reviewers.criteria.availability ??= true;
+  doc.reviewers.criteria.expertise_files ??= 10;
+  doc.reviewers.criteria.expertise_commits ??= 30;
+  doc.sync ??= {};
+  doc.sync.targets ??= ["claude", "agents", "copilot", "coderabbit"];
   doc.risk_paths ??= [];
   doc.risk_reviewers ??= [];
   doc.exempt_paths ??= [];
@@ -146,8 +152,35 @@ export function validateConventions(doc, file = "review-conventions.yml") {
   if (!["expertise", "rotation"].includes(doc.reviewers.strategy)) {
     errors.push('reviewers.strategy must be "expertise" or "rotation"');
   }
-  if (typeof doc.reviewers.skip_unavailable !== "boolean") {
-    errors.push("reviewers.skip_unavailable must be true or false");
+  const crit = doc.reviewers.criteria;
+  const RANK_KEYS = ["load", "expertise"];
+  if (
+    !Array.isArray(crit.rank) ||
+    crit.rank.length === 0 ||
+    crit.rank.some((k) => !RANK_KEYS.includes(k)) ||
+    new Set(crit.rank).size !== crit.rank.length
+  ) {
+    errors.push(
+      `reviewers.criteria.rank must be a non-empty, duplicate-free list drawn from: ${RANK_KEYS.join(", ")}`
+    );
+  }
+  if (typeof crit.availability !== "boolean") {
+    errors.push("reviewers.criteria.availability must be true or false");
+  }
+  for (const key of ["expertise_files", "expertise_commits"]) {
+    if (!Number.isInteger(crit[key]) || crit[key] < 1 || crit[key] > 100) {
+      errors.push(`reviewers.criteria.${key} must be an integer between 1 and 100`);
+    }
+  }
+  const SYNC_TARGETS = ["claude", "agents", "copilot", "coderabbit"];
+  if (
+    !Array.isArray(doc.sync.targets) ||
+    doc.sync.targets.some((t) => !SYNC_TARGETS.includes(t)) ||
+    new Set(doc.sync.targets).size !== doc.sync.targets.length
+  ) {
+    errors.push(
+      `sync.targets must be a duplicate-free list drawn from: ${SYNC_TARGETS.join(", ")} (empty disables sync)`
+    );
   }
   strArray(doc.reviewers.pool, "reviewers.pool");
   strArray(doc.risk_reviewers, "risk_reviewers");

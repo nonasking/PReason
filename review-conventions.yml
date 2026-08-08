@@ -15,6 +15,19 @@
 version: 1
 
 # ---------------------------------------------------------------------------
+# Which tool configs `npm run sync` generates from this file.
+#   claude     → CLAUDE.md (marked block)
+#   agents     → AGENTS.md (marked block) — the cross-tool convention most
+#                other AI reviewers/agents read (Codex, Cursor, Gemini, …)
+#   copilot    → .github/copilot-instructions.md + .github/instructions/*
+#   coderabbit → .coderabbit.yaml
+# Remove a target you don't use; fully-generated files of a removed target are
+# deleted on the next sync.
+# ---------------------------------------------------------------------------
+sync:
+  targets: [claude, agents, copilot, coderabbit]
+
+# ---------------------------------------------------------------------------
 # Severity contract: every AI review comment must start with one of these tags.
 # The merge gate blocks while any unresolved AI thread carries a `block_on` tag.
 # Untagged AI comments are treated as `default` (tools don't always comply).
@@ -169,21 +182,30 @@ reviewers:
   risk_label: needs-human-review
 
   # strategy: how the reviewer is chosen from the pool.
-  #   expertise — rank candidates by recent commits to the files this PR
-  #               changes, then pick the least-loaded of the people who
-  #               actually know the code. Load-balancing *across everyone*
-  #               backfires: authors just scroll past an unqualified
-  #               suggestion and pick someone else, so the balancing is lost.
+  #   expertise — rank candidates by the criteria below. Default: people who
+  #               actually touched the changed files, least-loaded first.
+  #               Load-balancing *across everyone* backfires: authors scroll
+  #               past an unqualified suggestion and pick someone else.
   #   rotation  — deterministic round robin (PR number modulo pool size).
-  #               Ignores both expertise and queue depth; use it only when the
-  #               pool is small and interchangeable.
+  #               Ignores the criteria; use it only when the pool is small and
+  #               interchangeable.
   strategy: expertise
 
-  # Skip reviewers whose GitHub status is set to "busy". Availability-blind
-  # assignment is a documented way to make PRs silently stall. If every
-  # candidate is busy, the filter is dropped rather than leaving the PR
-  # unassigned.
-  skip_unavailable: true
+  # criteria: the expertise strategy, tunable. These are the defaults — omit
+  # the whole block to accept them.
+  #   rank:         sort keys, applied in order. "load" = fewer open review
+  #                 requests first; "expertise" = more recent commits to the
+  #                 changed files first. Login breaks remaining ties, so
+  #                 re-runs never reshuffle.
+  #   availability: skip reviewers whose GitHub status is "busy" (dropped
+  #                 rather than leaving the PR unassigned if everyone is busy).
+  #   expertise_files:   sample the N largest changed files when scoring.
+  #   expertise_commits: look back N commits per sampled file.
+  criteria:
+    rank: [load, expertise]
+    availability: true
+    expertise_files: 10
+    expertise_commits: 30
 
 # ---------------------------------------------------------------------------
 # Risk tiering.

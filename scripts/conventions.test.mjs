@@ -24,6 +24,7 @@ import {
   spliceMarkedBlock,
 } from "./lib/conventions.mjs";
 import { verifyBlockers, blocksMerge } from "./lib/verify.mjs";
+import { rankCandidates } from "./lib/rank.mjs";
 import {
   renderVerdictCache,
   parseVerdictCache,
@@ -215,11 +216,52 @@ test("reviewer counts must be non-negative integers", () => {
 
 test("assignment strategy is validated and defaults to expertise", () => {
   assert.equal(base.reviewers.strategy, "expertise");
-  assert.equal(base.reviewers.skip_unavailable, true);
-  for (const patch of [{ strategy: "random" }, { skip_unavailable: "yes" }]) {
-    assert.throws(() => validateConventions(clone({ reviewers: patch })), /reviewers\./);
-  }
+  assert.throws(() => validateConventions(clone({ reviewers: { strategy: "random" } })), /reviewers\./);
   assert.doesNotThrow(() => validateConventions(clone({ reviewers: { strategy: "rotation" } })));
+});
+
+test("assignment criteria default sensibly and are validated", () => {
+  assert.deepEqual(base.reviewers.criteria.rank, ["load", "expertise"]);
+  assert.equal(base.reviewers.criteria.availability, true);
+  assert.equal(base.reviewers.criteria.expertise_files, 10);
+  assert.equal(base.reviewers.criteria.expertise_commits, 30);
+
+  for (const criteria of [
+    { rank: [] }, // empty
+    { rank: ["load", "load"] }, // duplicate
+    { rank: ["vibes"] }, // unknown key
+    { availability: "yes" },
+    { expertise_files: 0 },
+    { expertise_commits: 101 },
+  ]) {
+    const bad = clone();
+    Object.assign(bad.reviewers.criteria, criteria);
+    assert.throws(() => validateConventions(bad), /reviewers\.criteria/);
+  }
+});
+
+test("ranking follows the configured criteria order", () => {
+  const scores = {
+    expertise: new Map([["alice", 5], ["bob", 1]]),
+    load: new Map([["alice", 3], ["bob", 0]]),
+  };
+  // load first (default): bob is idle, wins despite less expertise
+  assert.deepEqual(rankCandidates(["alice", "bob"], ["load", "expertise"], scores), ["bob", "alice"]);
+  // expertise first: alice knows the code, wins despite the queue
+  assert.deepEqual(rankCandidates(["alice", "bob"], ["expertise", "load"], scores), ["alice", "bob"]);
+});
+
+test("ranking ties break on login so re-runs never reshuffle", () => {
+  const tied = rankCandidates(["carol", "alice", "bob"], ["load"], {});
+  assert.deepEqual(tied, ["alice", "bob", "carol"]);
+  assert.deepEqual(rankCandidates(["Bob", "alice"], ["load", "expertise"], {}), ["alice", "Bob"]);
+});
+
+test("sync targets default to all four and are validated", () => {
+  assert.deepEqual(base.sync.targets, ["claude", "agents", "copilot", "coderabbit"]);
+  assert.throws(() => validateConventions(clone({ sync: { targets: ["claude", "gemini"] } })), /sync\.targets/);
+  assert.throws(() => validateConventions(clone({ sync: { targets: ["claude", "claude"] } })), /sync\.targets/);
+  assert.doesNotThrow(() => validateConventions(clone({ sync: { targets: [] } })));
 });
 
 // --- review discipline rendering ------------------------------------------
