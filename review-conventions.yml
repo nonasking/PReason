@@ -57,6 +57,16 @@ gate:
   recheck_label: recheck-gate
   fork_policy: skip   # skip | block
 
+  # Break-glass for genuine emergencies: applying this label makes the gate
+  # pass immediately, ignoring every finding. Deliberately loud, never silent:
+  # the gate report names who pulled the lever, and merging the PR opens a
+  # post-hoc review issue automatically — review is deferred, not skipped.
+  # hotfix_allowed limits who may apply it (empty = anyone who can add labels);
+  # a label applied by anyone else is ignored and the gate runs normally.
+  # Set hotfix_label to null to remove the escape hatch entirely.
+  hotfix_label: hotfix
+  hotfix_allowed: []
+
 # ---------------------------------------------------------------------------
 # Blocker verification.
 #

@@ -102,7 +102,22 @@ gate:
   require_ai_review: true      # fail when no AI reviewer posted anything
   recheck_label: recheck-gate  # toggle this label to force a re-run
   fork_policy: skip            # skip | block
+  hotfix_label: hotfix         # break-glass label; null disables it
+  hotfix_allowed: []           # who may apply it; empty = anyone who can label
 ```
+
+**`hotfix_label` is the break-glass.** A genuine emergency must be able to merge
+past every finding, or people route around the gate permanently the first time
+it stands between them and an incident fix. Applying the label makes the gate
+pass immediately — and loudly: the gate report names who applied it, a human
+reviewer is still requested, and **merging the PR opens a post-hoc review issue
+automatically** (assigned to the author, with a checklist). Review is deferred,
+never erased. Removing the label restores normal gating on the spot.
+
+`hotfix_allowed` restricts the lever to named logins (leads, on-call). A label
+applied by anyone else is called out in the report and ignored. Note the gate
+check going green does not bypass an org-level required-approval rule — handle
+true emergencies there with a ruleset bypass list.
 
 **`require_ai_review` closes a fail-open hole.** `claude-code-action` can exit
 successfully having posted nothing at all (its comment MCP server failing to

@@ -57,6 +57,21 @@ test("gate options default sensibly", () => {
   assert.equal(base.reviewers.risk_count, base.reviewers.count || base.reviewers.risk_count);
 });
 
+test("hotfix break-glass defaults on with an open allow-list, and validates", () => {
+  assert.equal(base.gate.hotfix_label, "hotfix");
+  assert.deepEqual(base.gate.hotfix_allowed, []);
+
+  for (const patch of [{ hotfix_label: "" }, { hotfix_label: 3 }, { hotfix_allowed: "me" }]) {
+    const bad = clone();
+    Object.assign(bad.gate, patch);
+    assert.throws(() => validateConventions(bad), /gate\.hotfix/);
+  }
+  // null disables the escape hatch entirely
+  const off = clone();
+  off.gate.hotfix_label = null;
+  assert.doesNotThrow(() => validateConventions(off));
+});
+
 // --- severity parsing -----------------------------------------------------
 
 test("severity tags parse in the forms reviewers actually emit", () => {

@@ -19,6 +19,7 @@ import {
   isBlocking,
   findingFingerprint,
   isAdvisoryReviewer,
+  normalizeLogin,
   matchesAny,
 } from "./lib/conventions.mjs";
 import { verifyBlockers, blocksMerge, VERIFIER_VERSION } from "./lib/verify.mjs";
@@ -141,6 +142,61 @@ async function postReport(verdicts = verdictCache) {
     }
   } catch (e) {
     console.error(`(could not post gate report comment: ${e.message})`);
+  }
+}
+
+// --- hotfix break-glass ---------------------------------------------------
+
+// A genuine emergency must be able to merge past every finding. The bypass is
+// deliberately loud: the report names who applied the label, and merging the
+// PR opens a post-hoc review issue (see posthoc-hotfix.mjs) — review is
+// deferred, not skipped. gate.hotfix_allowed restricts who can pull the lever.
+const hotfixLabel = conventions.gate.hotfix_label;
+if (hotfixLabel && (pr.labels || []).some((l) => l.name === hotfixLabel)) {
+  const applier = await lastLabelApplier(hotfixLabel);
+  const allowed = conventions.gate.hotfix_allowed;
+  const permitted =
+    allowed.length === 0 ||
+    allowed.some((l) => normalizeLogin(l) === normalizeLogin(applier));
+
+  if (permitted) {
+    say(`### ⚠️ Hotfix bypass active`);
+    say("");
+    say(
+      `The \`${hotfixLabel}\` label${applier ? ` (applied by @${applier})` : ""} makes this ` +
+        `gate pass regardless of review findings.`
+    );
+    say("");
+    say("- Every AI finding on this PR is **non-blocking** while the label is present.");
+    say("- A human reviewer is still requested, for post-hoc review.");
+    say("- **Merging this PR opens a post-hoc review issue automatically.**");
+    say("- Remove the label to restore normal gating.");
+    await postReport();
+    finish(0);
+  }
+  say(
+    `_\`${hotfixLabel}\` was applied by @${applier ?? "unknown"}, who is not in ` +
+      `\`gate.hotfix_allowed\` — bypass ignored, normal gating applies._`
+  );
+  say("");
+}
+
+// Who most recently applied a label — the audit trail for the bypass.
+async function lastLabelApplier(labelName) {
+  try {
+    let applier = null;
+    for (let page = 1; ; page++) {
+      const events = await rest(`/issues/${prNumber}/events?per_page=100&page=${page}`);
+      for (const e of events) {
+        if (e.event === "labeled" && e.label?.name === labelName) {
+          applier = e.actor?.login ?? applier;
+        }
+      }
+      if (events.length < 100) break;
+    }
+    return applier;
+  } catch {
+    return null;
   }
 }
 

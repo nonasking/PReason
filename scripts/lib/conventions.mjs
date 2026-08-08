@@ -28,6 +28,8 @@ export function loadConventions(root = repoRoot()) {
   doc.gate.require_ai_review ??= true;
   doc.gate.recheck_label ??= "recheck-gate";
   doc.gate.fork_policy ??= "skip";
+  doc.gate.hotfix_label ??= "hotfix";
+  doc.gate.hotfix_allowed ??= [];
   doc.verification ??= {};
   doc.verification.enabled ??= false;
   doc.verification.model ??= "claude-opus-5";
@@ -111,6 +113,10 @@ export function validateConventions(doc, file = "review-conventions.yml") {
   if (!["skip", "block"].includes(doc.gate.fork_policy)) {
     errors.push('gate.fork_policy must be "skip" or "block"');
   }
+  if (doc.gate.hotfix_label !== null && !isStr(doc.gate.hotfix_label)) {
+    errors.push("gate.hotfix_label must be a non-empty string, or null to disable the bypass");
+  }
+  strArray(doc.gate.hotfix_allowed, "gate.hotfix_allowed");
 
   if (typeof doc.verification.enabled !== "boolean") {
     errors.push("verification.enabled must be true or false");

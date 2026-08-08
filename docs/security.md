@@ -151,7 +151,22 @@ nothing beyond what §5.1(1) already grants that author with one click, and the
 attempt itself is durable evidence — the injected text sits in the diff, in
 history, reviewable by the human the pipeline assigns.
 
-### 5.3 Spend abuse
+### 5.3 The hotfix bypass is a designed hole — treat it as one
+
+`gate.hotfix_label` lets a labeled PR pass the gate regardless of findings.
+This is deliberate: without a sanctioned emergency path, the first incident
+that a red gate delays teaches the team to route around the gate permanently.
+The bypass is engineered to be **loud, attributable, and debt-tracked**: the
+gate report names who applied the label (from the issue event log), the label
+is visible on the PR, and merging opens a post-hoc review issue automatically —
+so every use leaves three artifacts. For org deployment: set `hotfix_allowed`
+to the on-call/lead group, alert on the post-hoc issues (they should be rare —
+a healthy reference point is well under 1% of merges), and remember the gate
+check is only one of the branch-protection requirements — an org
+required-approval rule still applies unless the ruleset's bypass list says
+otherwise. Set `hotfix_label: null` to remove the hatch entirely.
+
+### 5.4 Spend abuse
 
 Every push re-runs the review (~$0.7–1.5/PR observed). A hot PR or a
 force-push loop multiplies cost; concurrency cancels overlapping runs but not
@@ -159,7 +174,7 @@ sequential ones. Set a spend cap on the Anthropic workspace key (§6) so the
 failure mode is "reviews pause" — which the gate then reports as missing
 review, failing closed — rather than an invoice.
 
-### 5.4 What the pipeline does not see
+### 5.5 What the pipeline does not see
 
 Advisory reviewers' findings never block (by design). Base-branch state, CI
 results, and anything outside the diff are out of scope for the verifier. The
@@ -190,6 +205,8 @@ size gate defaults to `warn` until you switch it to `block`.
 - [ ] `size.action: block` once the team has agreed a threshold
 - [ ] `risk_paths` covering payment, auth, migration, and infra paths;
   `risk_reviewers` named; the risk label wired to a ruleset requiring review
+- [ ] `gate.hotfix_allowed` restricted to the on-call/lead group; post-hoc
+  review issues monitored (healthy usage is well under 1% of merges)
 - [ ] `verification.votes: 3` where a wrong block or wrong pass is expensive
 - [ ] Keep Copilot (and any newly trialed tool) in `advisory_reviewers` until
   its findings earn gating
