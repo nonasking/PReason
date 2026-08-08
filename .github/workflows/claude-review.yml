@@ -34,12 +34,12 @@ jobs:
     # so a stuck review fails fast instead of pinning a required check.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1 # the review reads the diff via `gh pr diff`, not git history
 
       - name: Claude code review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@6b082c41935b4c8a3b8b0ef85ba4ba4d9eeb8975 # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Reviews are biased by existing comments — including the reviewer's

@@ -178,6 +178,8 @@ gets wrong. Each is handled in code; see [docs/configuration.md](docs/configurat
 
 ## Documentation
 
+- [docs/security.md](docs/security.md) — threat model, data flows, residual
+  risks, and the org deployment checklist
 - [docs/design.md](docs/design.md) — how the pipeline works, why it's shaped
   this way, and what isn't built yet
 - [docs/configuration.md](docs/configuration.md) — every configuration option
