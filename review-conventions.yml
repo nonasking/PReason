@@ -61,8 +61,11 @@ gate:
   # pass immediately, ignoring every finding. Deliberately loud, never silent:
   # the gate report names who pulled the lever, and merging the PR opens a
   # post-hoc review issue automatically — review is deferred, not skipped.
-  # hotfix_allowed limits who may apply it (empty = anyone who can add labels);
-  # a label applied by anyone else is ignored and the gate runs normally.
+  #
+  # The empty allow-list is the intended default: in an incident, the engineer
+  # holding the pager decides, and accountability comes from visibility rather
+  # than permission. Populate hotfix_allowed only if compliance requires a
+  # named group (labels from anyone else are then called out and ignored).
   # Set hotfix_label to null to remove the escape hatch entirely.
   hotfix_label: hotfix
   hotfix_allowed: []

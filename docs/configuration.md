@@ -114,10 +114,17 @@ reviewer is still requested, and **merging the PR opens a post-hoc review issue
 automatically** (assigned to the author, with a checklist). Review is deferred,
 never erased. Removing the label restores normal gating on the spot.
 
-`hotfix_allowed` restricts the lever to named logins (leads, on-call). A label
-applied by anyone else is called out in the report and ignored. Note the gate
-check going green does not bypass an org-level required-approval rule — handle
-true emergencies there with a ruleset bypass list.
+**The default trusts every engineer** (`hotfix_allowed: []`), and that is the
+recommended setting, not an oversight. In an incident, speed beats review, and
+the person holding the pager is the one who knows it's an incident — a
+permission check in that moment only delays the fix or teaches people to bypass
+the system entirely. Autonomy works here because usage is fully visible: the
+named applier, the label on the PR, and the post-hoc issue. Set
+`hotfix_allowed` to a named group only if your compliance posture demands it;
+a label applied by anyone outside the list is called out in the report and
+ignored. Note the gate check going green does not bypass an org-level
+required-approval rule — handle true emergencies there with a ruleset bypass
+list.
 
 **`require_ai_review` closes a fail-open hole.** `claude-code-action` can exit
 successfully having posted nothing at all (its comment MCP server failing to

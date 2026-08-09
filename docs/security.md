@@ -159,12 +159,20 @@ that a red gate delays teaches the team to route around the gate permanently.
 The bypass is engineered to be **loud, attributable, and debt-tracked**: the
 gate report names who applied the label (from the issue event log), the label
 is visible on the PR, and merging opens a post-hoc review issue automatically —
-so every use leaves three artifacts. For org deployment: set `hotfix_allowed`
-to the on-call/lead group, alert on the post-hoc issues (they should be rare —
-a healthy reference point is well under 1% of merges), and remember the gate
-check is only one of the branch-protection requirements — an org
-required-approval rule still applies unless the ruleset's bypass list says
-otherwise. Set `hotfix_label: null` to remove the hatch entirely.
+so every use leaves three artifacts.
+
+**By default, any engineer can pull the lever, and that is the design position,
+not a gap.** During an incident, speed of remediation outranks review, and the
+person responding is the one who knows it's an emergency; a permission check at
+that moment adds latency exactly when latency is the harm. The control model is
+accountability-through-visibility, not permission: misuse is cheap to commit
+and impossible to hide, which is the same trade the rest of the gate makes
+(§5.1). Monitor the post-hoc issues — healthy usage is well under 1% of merges;
+a rising rate is a process conversation, not a config change. `hotfix_allowed`
+exists for orgs whose compliance regime requires a named group, and
+`hotfix_label: null` removes the hatch entirely. The gate check is only one of
+the branch-protection requirements — an org required-approval rule still
+applies unless the ruleset's bypass list says otherwise.
 
 ### 5.4 Spend abuse
 
@@ -205,8 +213,9 @@ size gate defaults to `warn` until you switch it to `block`.
 - [ ] `size.action: block` once the team has agreed a threshold
 - [ ] `risk_paths` covering payment, auth, migration, and infra paths;
   `risk_reviewers` named; the risk label wired to a ruleset requiring review
-- [ ] `gate.hotfix_allowed` restricted to the on-call/lead group; post-hoc
-  review issues monitored (healthy usage is well under 1% of merges)
+- [ ] Post-hoc hotfix review issues monitored (healthy usage is well under 1%
+  of merges). Keep `hotfix_allowed` open by default — restrict it only if a
+  compliance regime requires a named group (§5.3)
 - [ ] `verification.votes: 3` where a wrong block or wrong pass is expensive
 - [ ] Keep Copilot (and any newly trialed tool) in `advisory_reviewers` until
   its findings earn gating
