@@ -134,6 +134,33 @@ adversarially verified before they hold the merge.
 | `.github/workflows/ci.yml` | Runs the unit tests and fails if generated configs don't match the YAML source |
 | `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/*`, `.coderabbit.yaml` | **Generated** (see `sync.targets`) — never edit by hand |
 
+## What it costs
+
+Measured, not estimated — the pipeline reports its own spend in the workflow
+logs:
+
+- **Review: $0.31 for a small PR** on `claude-opus-5` (this repo's test PR —
+  25 changed lines, 12 agent turns, 7 inline findings). External measurement
+  of the same action: **$0.73 for a 338-line PR, $1.34 for 598 lines**. Cost
+  is driven by repo exploration, not diff size, so `--max-turns` and model
+  choice are the levers.
+- **Verification: cents per blocking finding**, not per PR — each blocker is
+  judged once and the verdict is cached in the gate comment, so re-runs and
+  re-pushes don't re-bill.
+- **Monthly, modeled for 18 developers / 800 PRs**: roughly **$620–1,150 on
+  Opus**, **~$310 on Haiku 4.5**. Swapping `--model` in `claude-review.yml`
+  is the whole change. Break-even against $24-per-seat SaaS reviewers sits
+  around 33 PRs per developer per month — above that a seat is cheaper, below
+  it BYOK is, and at typical high-velocity volume they're a wash on price
+  (control and features decide, not cost).
+- Everything bills to your own Anthropic API key, so the console shows
+  per-run token usage — the template doubles as a cost-measurement rig
+  before any team-wide rollout.
+
+Full comparison against CodeRabbit, Qodo, Greptile, Copilot and the rest —
+including the cost model's assumptions — in
+[docs/comparison.md](docs/comparison.md).
+
 ## Platform constraints this works around
 
 These are GitHub and tooling realities that a naive version of this pipeline
@@ -174,10 +201,8 @@ gets wrong. Each is handled in code; see [docs/configuration.md](docs/configurat
 - **Rebuttals are honored by design.** Resolving a thread with a reply counts
   as handling it. The human reviewer sees the rebuttal in the thread history —
   that's exactly the kind of judgment call their five minutes are for.
-- **Cost:** with `claude-opus-5` a typical PR review runs a few tens of cents;
-  swap the model in `claude-review.yml` (`--model claude-haiku-4-5`) for
-  high-volume/low-risk repos. Your Anthropic console shows per-run token usage,
-  so the template doubles as a cost-measurement rig before a team-wide rollout.
+- **Cost** is covered in its own section above — measured per-PR numbers, the
+  monthly model, and the SaaS break-even.
 
 ## Documentation
 
