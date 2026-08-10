@@ -395,7 +395,18 @@ already depend on `copilot-instructions.md` and for path-scoped `applyTo` rules.
 
 ---
 
-## 9. Cost and latency
+## 9. Cost, latency, and runtime footprint
+
+**Runtime footprint on the host application: zero.** Nothing under `scripts/`
+is imported by application code; the workflows run only in CI; the two npm
+packages are `devDependencies`, so a production install (`npm ci --omit=dev`)
+or a Docker build that prunes dev deps never materializes them. What adopting
+PReason actually adds to a server repo is ~60KB of text files and CI jobs that
+run beside — not inside — the application. The costs that do exist are
+developer-loop costs: the gate job takes under a minute per PR event (npm
+cache enabled), and if `gate` is a required check, merges wait on the review
+workflow (~2–4 minutes) — that wait is the enforcement working, not overhead
+on the app.
 
 Measured for the open-source `claude-code-action` path: roughly **$0.73 for a
 338-line PR** and **$1.34 for a 598-line PR** on an Opus-tier model — mildly

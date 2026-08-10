@@ -101,6 +101,10 @@ function buildPrompt(finding, patch, { conventions, prTitle, prBody }) {
     "```",
     "",
     "Is this finding real, by the standard in your instructions?",
+    // Verdict reasons are quoted verbatim in the gate report the author reads.
+    conventions.review.language
+      ? `Write the "reason" field in ${conventions.review.language}.`
+      : "",
   ]
     .filter((s) => s !== "")
     .join("\n");

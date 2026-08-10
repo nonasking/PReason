@@ -231,6 +231,7 @@ to be split anyway.
 
 ```yaml
 review:
+  language: Korean       # comment prose language; null = model default (English)
   max_comments: 10
   require_evidence: true
   allow_no_findings: true
@@ -250,6 +251,7 @@ well-tuned reviewer runs at 1–2 findings per review.
 
 | Option | Why it's there |
 |---|---|
+| `language` | Review comments (and the verifier's verdict reasons in the gate report) are written in this language. **Severity tags are exempt** — they stay exactly as configured, because the gate parses them. Free text (`Korean`, `Japanese`, …); reaches every synced tool. |
 | `max_comments` | A stated budget. The gate reports when open comments exceed it — a signal that `suppress` needs tightening. |
 | `suppress` | Negative prompting. Naming what *not* to flag works far better than asking for "high-signal comments". |
 | `allow_no_findings` | Asked to find problems, a model will invent them. This makes an empty review an explicitly correct answer. |

@@ -41,6 +41,7 @@ export function loadConventions(root = repoRoot()) {
   doc.size.label ??= "oversized-pr";
   doc.size.exclude ??= [];
   doc.review ??= {};
+  doc.review.language ??= null;
   doc.review.max_comments ??= 0;
   doc.review.require_evidence ??= false;
   doc.review.allow_no_findings ??= true;
@@ -139,6 +140,9 @@ export function validateConventions(doc, file = "review-conventions.yml") {
   if (!isStr(doc.size.label)) errors.push("size.label must be a non-empty string");
   strArray(doc.size.exclude, "size.exclude");
 
+  if (doc.review.language !== null && !isStr(doc.review.language)) {
+    errors.push("review.language must be a non-empty string (or null for the model default)");
+  }
   if (!Number.isInteger(doc.review.max_comments) || doc.review.max_comments < 0) {
     errors.push("review.max_comments must be an integer ≥ 0 (0 means no stated budget)");
   }
@@ -341,6 +345,14 @@ export function renderConventionsMarkdown(conventions) {
       `Unresolved ${conventions.severity.block_on.map((t) => `\`[${t}]\``).join("/")} ` +
       `comments block the merge gate.`
   );
+
+  if (review.language) {
+    lines.push("");
+    lines.push(
+      `Write all review comment prose in ${review.language}. The severity tag itself must ` +
+        `remain exactly as written above — it is machine-parsed by the merge gate.`
+    );
+  }
 
   const discipline = [];
   if (review.max_comments > 0) {

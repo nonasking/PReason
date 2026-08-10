@@ -10,7 +10,7 @@
     "check": "npm test && node scripts/sync-conventions.mjs --check"
   },
   "license": "Apache-2.0",
-  "dependencies": {
+  "devDependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "js-yaml": "^4.1.0"
   }

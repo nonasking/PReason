@@ -5,6 +5,8 @@
 
 Severity contract: every review comment starts with one of `[blocker]`, `[warn]`, `[nit]`. Untagged comments are treated as `[warn]`. Unresolved `[blocker]` comments block the merge gate.
 
+Write all review comment prose in Korean. The severity tag itself must remain exactly as written above — it is machine-parsed by the merge gate.
+
 ### How much to say
 
 - Leave at most 10 comments on a pull request. If more than that seem warranted, report only the 10 most consequential. A reviewer that comments on everything gets ignored on everything.

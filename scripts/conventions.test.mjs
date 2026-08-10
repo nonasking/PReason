@@ -294,6 +294,20 @@ test("review discipline reaches the generated instructions", () => {
   }
 });
 
+test("review language renders as an instruction, tags stay machine-parseable", () => {
+  const ko = clone({ review: { language: "Korean" } });
+  const md = renderConventionsMarkdown(ko);
+  assert.match(md, /Write all review comment prose in Korean/);
+  assert.match(md, /must remain exactly as written above/, "tags are exempt from translation");
+
+  const none = clone({ review: { language: null } });
+  assert.doesNotMatch(renderConventionsMarkdown(none), /review comment prose in/);
+
+  const bad = clone();
+  bad.review.language = "";
+  assert.throws(() => validateConventions(bad), /review\.language/);
+});
+
 test("discipline sections disappear when switched off", () => {
   const quiet = clone({
     review: {

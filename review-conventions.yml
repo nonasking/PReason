@@ -130,6 +130,9 @@ size:
 # them — so allow_no_findings makes an empty review an explicitly correct answer.
 # ---------------------------------------------------------------------------
 review:
+  # Language for review comment prose. Severity tags stay exactly as configured
+  # above regardless (they are machine-parsed by the gate). null = model default.
+  language: Korean
   max_comments: 10
   require_evidence: true          # quote the offending line, or drop the finding
   allow_no_findings: true         # "nothing to flag" is a valid review

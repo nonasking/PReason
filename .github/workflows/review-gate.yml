@@ -88,6 +88,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
+          cache: npm
       - run: npm ci --ignore-scripts
 
       - name: Resolve PR number
@@ -140,6 +141,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
+          cache: npm
       - run: npm ci --ignore-scripts
       - name: Open post-hoc review issue if the hotfix bypass was used
         run: node scripts/posthoc-hotfix.mjs

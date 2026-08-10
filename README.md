@@ -56,9 +56,12 @@ reviewer's five minutes actually sufficient.
 
 1. **Use this repo as a template** (or copy `review-conventions.yml`,
    `scripts/`, `.github/workflows/`, and `package.json` into an existing repo —
-   for a JS project, merge the `scripts` and `dependencies` into your own
+   for a JS project, merge the `scripts` and `devDependencies` into your own
    `package.json` instead). PReason has no runtime of its own — it is these
-   files plus two small dependencies (`js-yaml`, `@anthropic-ai/sdk`).
+   files plus two small **dev** dependencies (`js-yaml`, `@anthropic-ai/sdk`)
+   that only CI installs. Nothing is imported by your application, so adding
+   PReason to a server repo has zero runtime footprint: production builds with
+   `--omit=dev` never even install it.
 
 2. **Edit `review-conventions.yml`** — your rules, your risk paths, your
    reviewer pool:
