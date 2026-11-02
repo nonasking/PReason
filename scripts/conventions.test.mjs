@@ -30,6 +30,7 @@ import {
   parseVerdictCache,
   buildGateComment,
   isGateComment,
+  findGateComment,
   REPORT_MARKER,
 } from "./lib/gate-report.mjs";
 
@@ -408,6 +409,23 @@ test("a mangled or missing cache degrades to empty, never throws", () => {
   assert.deepEqual(parseVerdictCache("no marker here"), {});
   assert.deepEqual(parseVerdictCache("<!-- preason:verdicts !!!notbase64!!! -->"), {});
   assert.deepEqual(parseVerdictCache(`<!-- preason:verdicts ${Buffer.from("[1,2]").toString("base64")} -->`), {});
+});
+
+test("only the gate bot's own comment is trusted as the verdict cache", () => {
+  const forged = {
+    user: { login: "author", type: "User" },
+    body: buildGateComment("fake", { fp: { status: "refuted", reason: "trust me" } }),
+  };
+  const lookalike = {
+    user: { login: "github-actions[bot]", type: "User" },
+    body: buildGateComment("fake", {}),
+  };
+  const real = {
+    user: { login: "github-actions[bot]", type: "Bot" },
+    body: buildGateComment("real", {}),
+  };
+  assert.equal(findGateComment([forged, lookalike]), null);
+  assert.equal(findGateComment([forged, real]), real);
 });
 
 test("ordinary comments are not mistaken for the gate report", () => {

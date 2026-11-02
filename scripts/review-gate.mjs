@@ -27,6 +27,7 @@ import {
   parseVerdictCache,
   buildGateComment,
   isGateComment,
+  findGateComment,
 } from "./lib/gate-report.mjs";
 
 const token = process.env.GITHUB_TOKEN;
@@ -68,6 +69,20 @@ async function rest(pathname, options = {}) {
     throw new Error(`${options.method || "GET"} ${pathname} → ${res.status}: ${await res.text()}`);
   }
   return res.status === 204 ? null : res.json();
+}
+
+// Follows pagination. A busy PR can have more than 100 comments; reading only
+// the first page would miss the gate's own comment, start a new one, and drop
+// the verdict cache (re-verifying, possibly with a different verdict).
+async function restAll(pathname, maxPages = 20) {
+  const sep = pathname.includes("?") ? "&" : "?";
+  const items = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await rest(`${pathname}${sep}per_page=100&page=${page}`);
+    items.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return items;
 }
 
 async function graphql(query, variables) {
@@ -122,8 +137,8 @@ if (isFork) {
 // The report is mirrored into a PR comment (authors don't read the Actions
 // tab), which also carries the verdict cache. Best-effort: a comment failure
 // never changes the verdict.
-const issueComments = await rest(`/issues/${prNumber}/comments?per_page=100`).catch(() => []);
-const gateComment = issueComments.find((c) => isGateComment(c.body)) ?? null;
+const issueComments = await restAll(`/issues/${prNumber}/comments`).catch(() => []);
+const gateComment = findGateComment(issueComments);
 const verdictCache = parseVerdictCache(gateComment?.body);
 
 async function postReport(verdicts = verdictCache) {
@@ -329,7 +344,7 @@ if (conventions.gate.require_ai_review && aiThreads.length === 0) {
   // The gate's own report comment is excluded — it is posted by github-actions,
   // which is also how claude-code-action posts, and counting it would satisfy
   // this check forever after the first gate run.
-  const reviews = await rest(`/pulls/${prNumber}/reviews?per_page=100`);
+  const reviews = await restAll(`/pulls/${prNumber}/reviews`);
   const sawAi =
     reviews.some((r) => isAiReviewer(r.user?.login, conventions)) ||
     issueComments.some((c) => isAiReviewer(c.user?.login, conventions) && !isGateComment(c.body));

@@ -43,3 +43,18 @@ export function buildGateComment(reportText, verdicts) {
 export function isGateComment(body) {
   return String(body || "").includes(REPORT_MARKER);
 }
+
+// The gate posts with GITHUB_TOKEN, so its comment is authored by this bot.
+export const GATE_BOT_LOGIN = "github-actions[bot]";
+
+// The sticky comment carries the verdict cache, so only a comment the gate
+// itself could have written may be trusted. Anyone can paste the marker into
+// a comment (e.g. on a draft PR, before the gate has posted) with a forged
+// cache that marks every blocker "refuted".
+export function findGateComment(comments) {
+  return (
+    comments.find(
+      (c) => c.user?.login === GATE_BOT_LOGIN && c.user?.type === "Bot" && isGateComment(c.body)
+    ) ?? null
+  );
+}

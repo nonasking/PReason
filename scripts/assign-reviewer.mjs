@@ -137,11 +137,17 @@ const picked =
     ? rotate(basePool, count)
     : await byExpertise(basePool, count);
 
-await gh(`/pulls/${prNumber}/requested_reviewers`, {
-  method: "POST",
-  body: JSON.stringify({ reviewers: picked }),
-});
-console.log(`Requested review from: ${picked.join(", ")}${riskFiles.length ? " (risk path)" : ""}`);
+try {
+  await gh(`/pulls/${prNumber}/requested_reviewers`, {
+    method: "POST",
+    body: JSON.stringify({ reviewers: picked }),
+  });
+  console.log(`Requested review from: ${picked.join(", ")}${riskFiles.length ? " (risk path)" : ""}`);
+} catch (e) {
+  // Runs in the same job as the gate. A pool member without repo access (422)
+  // must not turn a passing gate red; assignment is a convenience, not a check.
+  console.log(`::warning::Could not request review from ${picked.join(", ")}: ${e.message}`);
+}
 
 // --- strategies -----------------------------------------------------------
 
